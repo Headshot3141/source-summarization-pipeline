@@ -3,7 +3,7 @@ import re
 import pymupdf
 from spellchecker import SpellChecker
 
-from common import ends_sentence, is_heading, yaml_value
+from common import PAGE_MARKER, ends_sentence, is_heading, strip_comments, yaml_value
 from count_words import words_in_text
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -239,23 +239,24 @@ def hyphen_decision(stem, first, ev):
     return True, "unverified"
 
 
-def join_hyphenated(left, right, ev=NO_EVIDENCE, log=None, page=None):
+def join_hyphenated(left, right, ev=NO_EVIDENCE, log=None, page=None, marker=""):
     """Join text ending in a letter and hyphen to its continuation, with no space.
 
     Before a capital or digit, or after a digit, the hyphen belongs to the
-    word (Anglo-Saxon, pre-1990, 55-member) and is kept, as it is inside a URL. Before a lowercase letter it
-    may be a line-break hyphen; the decision and its basis are logged.
+    word (Anglo-Saxon, pre-1990, 55-member) and is kept, as it is inside a
+    URL. Before a lowercase letter it may be a line-break hyphen; the
+    decision and its basis are logged. marker, if given, goes at the seam.
     """
     m = re.match(r"[a-z]+", right)
     token = left.rsplit(None, 1)[-1]
     stem = re.search(r"([A-Za-z]*)-$", left).group(1)
     if not m or not stem or is_url(token):
-        return left + right
+        return left + marker + right
     first = m.group(0)
     keep, basis = hyphen_decision(stem, first, ev)
     word = stem + ("-" if keep else "") + first
     _log(log, page, "hyphen-kept" if keep else "hyphen-removed", "%s- / %s -> %s (%s)" % (stem, first, word, basis))
-    return left + right if keep else left[:-1] + right
+    return (left if keep else left[:-1]) + marker + right
 
 
 def join_lines(lines, ev=NO_EVIDENCE, log=None, page=None):
@@ -355,9 +356,10 @@ def continues_within(a, b):
     return bool(re.search(r"[A-Za-z0-9]-$", a)) or is_open_ended(a)
 
 
-def join_across(a, b, ev, log, where, kind="page-join"):
+def join_across(a, b, ev, log, where, kind="page-join", marker=""):
+    """Join block a to its continuation b, with marker (if any) at the seam."""
     if re.search(r"[A-Za-z0-9]-$", a):
-        return join_hyphenated(a, b, ev, log, where)
+        return join_hyphenated(a, b, ev, log, where, marker)
     lw, fw = last_alpha(a), first_alpha(b)
     seam = "...%s | %s..." % (a[-30:], b[:30])
     lower = b[:1].islower()
@@ -365,36 +367,42 @@ def join_across(a, b, ev, log, where, kind="page-join"):
     joined_known = bool(fw) and ((lw + fw).lower() in ev.forms or is_known(lw + fw))
     if lower and not lw_known and joined_known:
         _log(log, where, kind + "-midword", "%s -> %s" % (seam, lw + fw))
-        return a + b
+        return a + marker + b
     # A word break needs a known last word and a lowercase continuation;
     # anything else (a possible new paragraph, an unknown word) needs a look.
     certain = lower and lw_known and not joined_known
     _log(log, where, kind if certain else kind + "-uncertain", seam)
-    return a + " " + b
+    return a + " " + (marker + " " if marker else "") + b
 
 
 def join_pages(pages, ev=NO_EVIDENCE, log=None):
-    """Flatten [(pdf_page, paragraphs)] into one paragraph list.
+    """Flatten [(pdf_page, paragraphs)] into one paragraph list with page markers.
 
     The last block of a page merges with the first block of the next page when
     the first does not end a sentence. On the same page, a block merges with
     the previous one only when it starts in lowercase. Each join is logged
     with its page numbers.
+
+    Every page with text gets a marker: on its own line above a paragraph
+    that starts the page, or inline at the seam where a paragraph runs on
+    from the previous page.
     """
     out = []
     prev_page = None
     for page_no, paras in pages:
+        marker = PAGE_MARKER % page_no
         for i, b in enumerate(paras):
-            if i == 0 and out and continues_across(out[-1], b):
-                out[-1] = join_across(out[-1], b, ev, log, "%s-%s" % (prev_page, page_no))
+            a = strip_comments(out[-1]) if out else ""
+            if i == 0 and out and continues_across(a, b):
+                out[-1] = join_across(out[-1], b, ev, log, "%s-%s" % (prev_page, page_no), marker=marker)
                 continue
-            if i > 0 and continues_within(out[-1], b):
+            if i > 0 and continues_within(a, b):
                 out[-1] = join_across(out[-1], b, ev, log, page_no, "block-join")
                 continue
-            if i == 0 and out and is_open_ended(out[-1]):
+            if i == 0 and out and is_open_ended(a):
                 _log(log, "%s-%s" % (prev_page, page_no), "page-break-unjoined",
-                     "...%s | %s..." % (out[-1][-30:], b[:30]))
-            out.append(b)
+                     "...%s | %s..." % (a[-30:], b[:30]))
+            out.append(marker + "\n" + b if i == 0 else b)
         if paras:
             prev_page = page_no
     return out
@@ -444,6 +452,22 @@ def validate_config(cfg):
     return errors
 
 
+def save_raw(cfg):
+    """Save every page's text, before any cleanup, to Work/Raw/{slug}/raw.txt.
+
+    Pages are separated by the same markers the chapter files use, so any
+    repair can be checked against what the PDF text layer gave.
+    """
+    folder = os.path.join(RAW, cfg["slug"])
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "raw.txt")
+    with pymupdf.open(os.path.join(SOURCES, cfg["pdf"])) as doc:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            for page in doc:
+                f.write(PAGE_MARKER % (page.number + 1) + "\n" + page.get_text("text") + "\n")
+    return path
+
+
 def build_markdown(src_title, part, chapters, extractor, slug, pdf=""):
     folder = os.path.join(OUT, slug)
     os.makedirs(folder, exist_ok=True)
@@ -485,6 +509,7 @@ if __name__ == "__main__":
         if problems:
             raise SystemExit("SOURCES_CONFIG errors:\n  " + "\n  ".join(problems))
         ran = True
+        print("raw text -> %s" % save_raw(cfg))
         log = RepairLog()
         build_markdown(cfg["title"], cfg["part"], cfg["chapters"], make_extractor(cfg, log), cfg["slug"], cfg["pdf"])
         log_path = os.path.join(RAW, cfg["slug"], "repairs.tsv")

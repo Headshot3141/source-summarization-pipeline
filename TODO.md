@@ -14,15 +14,17 @@ Fixed. Regression tests are in `Work/tests/test_extract.py` (`python -m unittest
 
 ## Medium: plan requirements not implemented
 
-- [ ] **Page markers are not written.** The plan keeps internal page markers for evidence lookup, but extraction discards page boundaries. Write a marker such as `<!-- page 12 -->` at each page break in the chapter text. The word counter already ignores lines that are only an HTML comment. The splitter must keep a marker attached to the text that follows it.
-- [ ] **The raw extraction is not saved.** Nothing writes to `Work/Raw/{slug}/`. Save each page's raw text before cleanup, with page boundaries, so repairs can be checked later.
-- [ ] **Rerunning the splitter overwrites hand-added context.** The plan lets the coordinator add context blocks to part files at weak boundaries. `split_parts.py` (`Work/split_parts.py:321`) rewrites every part file on each run, so those additions are lost. Store extra context in a separate config keyed by unit and part, and have the splitter insert it.
-- [ ] **Assembly skips its structural checks.** `assemble.py` doesn't check for missing `##` chapter headings, leftover page or pipeline markers, or leaked review notes. It also doesn't add the partial-deliverable notice when blocked units remain. Add these checks and fail on any hit.
-- [ ] **The introduction's length isn't reported separately.** The plan asks for it. `assemble.py` (`Work/assemble.py:59`) counts total words with a plain split, which includes headings. Use `words_in_text` and report the introduction and body separately.
+Fixed. Tests are in `Work/tests/test_pipeline.py`. Extra part context now lives in `Work/part_context.json`. The `assemble.py` path check from the Low list was fixed at the same time.
+
+- [x] **Page markers are not written.** The plan keeps internal page markers for evidence lookup, but extraction discards page boundaries. Write a marker such as `<!-- page 12 -->` at each page break in the chapter text. The word counter already ignores lines that are only an HTML comment. The splitter must keep a marker attached to the text that follows it.
+- [x] **The raw extraction is not saved.** Nothing writes to `Work/Raw/{slug}/`. Save each page's raw text before cleanup, with page boundaries, so repairs can be checked later.
+- [x] **Rerunning the splitter overwrites hand-added context.** The plan lets the coordinator add context blocks to part files at weak boundaries. `split_parts.py` (`Work/split_parts.py:321`) rewrites every part file on each run, so those additions are lost. Store extra context in a separate config keyed by unit and part, and have the splitter insert it.
+- [x] **Assembly skips its structural checks.** `assemble.py` doesn't check for missing `##` chapter headings, leftover page or pipeline markers, or leaked review notes. It also doesn't add the partial-deliverable notice when blocked units remain. Add these checks and fail on any hit.
+- [x] **The introduction's length isn't reported separately.** The plan asks for it. `assemble.py` (`Work/assemble.py:59`) counts total words with a plain split, which includes headings. Use `words_in_text` and report the introduction and body separately.
 
 ## Low: robustness
 
-- [ ] **The path check in `assemble.py` uses a plain prefix test.** At `Work/assemble.py:31`, a sibling folder such as `summarise2` would pass. Compare resolved paths with `Path.is_relative_to` instead.
+- [x] **The path check in `assemble.py` uses a plain prefix test.** At `Work/assemble.py:31`, a sibling folder such as `summarise2` would pass. Compare resolved paths with `Path.is_relative_to` instead.
 - [ ] **`build_pdf.py` only finds Edge in two fixed locations.** At `Work/build_pdf.py:67`, the script ignores PATH, although `requirements.txt` says Edge on PATH works. Try `shutil.which("msedge")` first.
 - [ ] **`build_pdf.py` builds the file URL by hand.** At `Work/build_pdf.py:82`, a path containing `#`, `%` or spaces breaks the URL. Use `pathlib.Path(HTML).as_uri()`.
 - [ ] **`build_pdf.py` ignores Edge's exit code and uses the default profile.** At `Work/build_pdf.py:91`, errors are hidden, and an open Edge window can interfere with printing. Check the return code, report stderr on failure, and pass a temporary `--user-data-dir`.
@@ -32,5 +34,5 @@ Fixed. Regression tests are in `Work/tests/test_extract.py` (`python -m unittest
 
 ## Verification after fixes
 
-- [ ] Rerun the scratchpad-style end-to-end test with a generated PDF: extract, split, then run the part checker, the review queue and the word-count check.
-- [ ] Add test cases for each fixed bug above (done for the High items), using the inputs from the review: the "War" title, the "as follows" paragraph, "Anglo-" and "Saxon", and a table cell reading "1990".
+- [ ] Rerun the scratchpad-style end-to-end test with a generated PDF: extract, split, then run the part checker, the review queue and the word-count check. Done on two real sources through the review queue, including a context entry and a stale one. The word-count check still needs summaries to run against.
+- [ ] Add test cases for each fixed bug above (done for the High and Medium items), using the inputs from the review: the "War" title, the "as follows" paragraph, "Anglo-" and "Saxon", and a table cell reading "1990".

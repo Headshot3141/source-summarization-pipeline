@@ -9,8 +9,20 @@ HARD_CAP = 32_000  # bytes, UTF-8, complete file
 OWNED_START = "<!-- begin owned text -->\n"
 OWNED_END = "\n<!-- end owned text -->"
 
+# Chapter text keeps a marker for each PDF page (one-based), for evidence
+# lookup. It sits on its own line above the first paragraph that starts on
+# the page, or inline where a paragraph runs on from the previous page.
+PAGE_MARKER = "<!-- page %d -->"
+PAGE_MARKER_RE = re.compile(r"<!-- page (\d+) -->")
+_COMMENT_RE = re.compile(r"<!--.*?-->[ \t]*\n?", re.S)
+
 _FM_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 _TITLE_RE = re.compile(r"\A\n*#[^\n]*\n\n*")
+
+
+def strip_comments(text):
+    """Text with HTML comments (page and pipeline markers) removed."""
+    return _COMMENT_RE.sub("", text)
 
 
 def rel(path):

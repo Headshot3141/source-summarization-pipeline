@@ -6,19 +6,23 @@ For every chapter:
 - the ordered owned slices rebuild the chapter body exactly, including
   whitespace and page markers, with frontmatter, headings, and overlap
   context left out;
-- every part boundary falls between sentences.
+- every part boundary falls between sentences;
+- every added context block is verbatim chapter text.
 
 Exits with status 1 if any check fails. Run from anywhere:
 
     python Work/check_parts.py
 """
 import json
+import re
 import sys
 
-from common import HARD_CAP, ROOT, chapter_body, ends_sentence, owned_text, parse_frontmatter
+from common import HARD_CAP, ROOT, chapter_body, ends_sentence, owned_text, parse_frontmatter, strip_comments
 from count_words import words_in_text
 
 MANIFEST = ROOT / "Work" / "parts_manifest.json"
+# Extra context blocks written by split_parts.py from Work/part_context.json.
+CONTEXT_RE = re.compile(r"<!-- context from [^\n]*? -->\n\n(.*?)\n\n<!-- end context -->", re.S)
 
 
 def first_difference(a, b):
@@ -86,6 +90,9 @@ def check_chapter(entry, fail):
             continue
         if words_in_text(owned) != p["words"]:
             fail(f"{name}: owned text has {words_in_text(owned)} words, manifest says {p['words']}")
+        for text in CONTEXT_RE.findall(raw):
+            if text not in body:
+                fail(f"{name}: added context is not verbatim chapter text: {text[:60]!r}")
         slices.append(owned)
 
     if None in slices:
@@ -103,7 +110,7 @@ def check_chapter(entry, fail):
         before, after = slices[k - 1], slices[k]
         if not ends_sentence(before):
             fail(f"{label}: part {k} ends mid-sentence: ...{before.rstrip()[-60:]!r}")
-        if after.lstrip()[:1].islower():
+        if strip_comments(after).lstrip()[:1].islower():
             fail(f"{label}: part {k + 1} starts in lowercase: {after.lstrip()[:60]!r}...")
 
 

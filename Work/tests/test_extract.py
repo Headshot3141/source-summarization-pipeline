@@ -11,8 +11,33 @@ import pymupdf
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import extract  # noqa: E402
-from common import ends_sentence  # noqa: E402
+from common import ends_sentence, strip_comments  # noqa: E402
 from extract import DocEvidence, RepairLog, join_lines, join_pages, strip_chapter_heading  # noqa: E402
+
+
+def plain_pages(*args, **kwargs):
+    """join_pages output with page markers removed."""
+    return [strip_comments(p) for p in join_pages(*args, **kwargs)]
+
+
+class PageMarkers(unittest.TestCase):
+    def test_marker_above_paragraph_that_starts_a_page(self):
+        paras = join_pages([(4, ["First.", "Second."]), (5, ["Third."])])
+        self.assertEqual(paras, ["<!-- page 4 -->\nFirst.", "Second.", "<!-- page 5 -->\nThird."])
+
+    def test_marker_inline_where_paragraph_runs_on(self):
+        paras = join_pages([(4, ["The treaty was"]), (5, ["signed in 1919."])])
+        self.assertEqual(paras, ["<!-- page 4 -->\nThe treaty was <!-- page 5 --> signed in 1919."])
+
+    def test_marker_inside_hyphenated_word(self):
+        paras = join_pages([(4, ["the popu-"]), (5, ["lation grew."])])
+        self.assertEqual(paras, ["<!-- page 4 -->\nthe popu<!-- page 5 -->lation grew."])
+
+    def test_markers_do_not_change_word_count(self):
+        from count_words import words_in_text
+        body = "\n\n".join(join_pages([(4, ["The treaty was"]), (5, ["signed. The popu-"]), (6, ["lation grew."])]))
+        self.assertEqual(words_in_text(body), 7)
+        self.assertEqual(strip_comments(body), "The treaty was signed. The population grew.")
 
 
 class StripChapterHeading(unittest.TestCase):
@@ -49,45 +74,45 @@ class StripChapterHeading(unittest.TestCase):
 class JoinPages(unittest.TestCase):
     def test_unpunctuated_paragraph_within_page_is_not_merged(self):
         pages = [(1, ["The rules are as follows", "First, arrive on time."])]
-        self.assertEqual(join_pages(pages), ["The rules are as follows", "First, arrive on time."])
+        self.assertEqual(plain_pages(pages), ["The rules are as follows", "First, arrive on time."])
 
     def test_paragraph_continues_across_page_break(self):
         log = RepairLog()
         pages = [(1, ["Intro.", "The treaty was"]), (2, ["signed in 1919.", "Next paragraph."])]
-        self.assertEqual(join_pages(pages, log=log), ["Intro.", "The treaty was signed in 1919.", "Next paragraph."])
+        self.assertEqual(plain_pages(pages, log=log), ["Intro.", "The treaty was signed in 1919.", "Next paragraph."])
         self.assertEqual(log.rows[0][1:3], ("1-2", "page-join"))
 
     def test_lowercase_block_within_page_joins(self):
         log = RepairLog()
         pages = [(3, ["Each party shall never develop, produce or", "stockpile such weapons.", "(b) Transfer them."])]
-        self.assertEqual(join_pages(pages, log=log),
+        self.assertEqual(plain_pages(pages, log=log),
                          ["Each party shall never develop, produce or stockpile such weapons.", "(b) Transfer them."])
         self.assertEqual(log.rows[0][1:3], (3, "block-join"))
 
     def test_only_first_block_of_next_page_joins(self):
         pages = [(1, ["The treaty was"]), (2, ["signed.", "and this stays separate"])]
-        self.assertEqual(join_pages(pages), ["The treaty was signed.", "and this stays separate"])
+        self.assertEqual(plain_pages(pages), ["The treaty was signed.", "and this stays separate"])
 
     def test_heading_shaped_page_end_is_flagged_not_joined(self):
         log = RepairLog()
-        paras = join_pages([(1, ["The rules are as follows"]), (2, ["First, arrive on time."])], log=log)
+        paras = plain_pages([(1, ["The rules are as follows"]), (2, ["First, arrive on time."])], log=log)
         self.assertEqual(paras, ["The rules are as follows", "First, arrive on time."])
         self.assertEqual(log.kinds(), ["page-break-unjoined"])
 
     def test_capitalized_continuation_is_joined_and_flagged(self):
         log = RepairLog()
         a = "Delegates from every member state travelled to the conference held at"
-        paras = join_pages([(1, [a]), (2, ["Versailles in the summer of 1919."])], log=log)
+        paras = plain_pages([(1, [a]), (2, ["Versailles in the summer of 1919."])], log=log)
         self.assertEqual(paras, [a + " Versailles in the summer of 1919."])
         self.assertEqual(log.kinds(), ["page-join-uncertain"])
 
     def test_sentence_end_does_not_join(self):
         pages = [(1, ["Done."]), (2, ["and more."])]
-        self.assertEqual(join_pages(pages), ["Done.", "and more."])
+        self.assertEqual(plain_pages(pages), ["Done.", "and more."])
 
     def test_hyphen_across_page_break(self):
         pages = [(1, ["They agreed to co-"]), (2, ["operate fully."])]
-        self.assertEqual(join_pages(pages, DocEvidence({"co-operate"})), ["They agreed to co-operate fully."])
+        self.assertEqual(plain_pages(pages, DocEvidence({"co-operate"})), ["They agreed to co-operate fully."])
 
 
 class JoinLines(unittest.TestCase):
@@ -150,7 +175,7 @@ class ListMarkers(unittest.TestCase):
     def test_list_item_on_next_page_is_not_joined(self):
         for item in ["(e) Assist the parties.", "4. The next note.", "12 Another note, 2020.", "• A bullet."]:
             pages = [(1, ["Members shall not: (d) acquire devices;"]), (2, [item])]
-            self.assertEqual(len(join_pages(pages)), 2, item)
+            self.assertEqual(len(plain_pages(pages)), 2, item)
 
     def test_closing_quote_or_bracket_ends_sentence(self):
         self.assertTrue(ends_sentence("as the minister put it, ‘we will not.’"))
@@ -229,7 +254,7 @@ class Extractor(unittest.TestCase):
                 log = RepairLog()
                 cfg = {"pdf": "src.pdf", "header_ymax": 0, "footer_ymin": 10000}
                 ch = {"unit_id": "ch-01", "title": "War", "start": 1, "end": 2}
-                paras = extract.make_extractor(cfg, log)(ch)
+                paras = [strip_comments(p) for p in extract.make_extractor(cfg, log)(ch)]
             finally:
                 extract.SOURCES = old
         self.assertEqual(paras, [

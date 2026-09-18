@@ -43,8 +43,10 @@ Work/
   manifest.json                     ordered unit paths and status
   parts_manifest.json               all processing units, with status, word counts, and budgets
   parts_report.txt                  split report: parts and sizes per chapter
+  part_context.json                 extra original-source context for parts, applied by split_parts.py
   review_queue.txt                  source|draft|summary|record|budget lines for review agents
-  Raw/{slug}/                       raw extraction with page boundaries
+  Raw/{slug}/raw.txt                raw text of every page, before cleanup, with page markers
+  Raw/{slug}/repairs.tsv            extraction repairs and uncertain decisions to check
   Chapters/{slug}/NN-slug.md        validated chapter source text
   Chapters/{slug}/parts/*.md        chapter parts assigned to agents
   Drafts/{slug}/NN-slug.md          original summarizer output, preserved
@@ -69,7 +71,7 @@ Each chapter source file starts with YAML frontmatter containing `source`, `sour
 - `chapter` holds the printed chapter label, or null if there is none.
 - `pdf_pages` uses one-based page numbers in the PDF file. `printed_pages` holds the printed labels, including Roman numerals and missing labels.
 
-Match files, manifest entries, and budgets on `(source_slug, unit_id)`. Filename prefixes show display order, but assembly follows the ordered chapter manifest. Keep internal page markers in the text for evidence lookup.
+Match files, manifest entries, and budgets on `(source_slug, unit_id)`. Filename prefixes show display order, but assembly follows the ordered chapter manifest. Keep internal page markers in the text for evidence lookup: `<!-- page N -->` gives the one-based PDF page, on its own line above a paragraph that starts the page, or inline where a paragraph runs on from the previous page. The word counter ignores them.
 
 `Work/manifest.json` is an ordered list. Each entry has `source_slug`, `unit_id`, a `path` relative to the project root (such as `Work/Summaries/{slug}/NN-slug.md`), and a `status` of `pending`, `drafted`, `accepted`, or `blocked`.
 
@@ -163,7 +165,7 @@ Each part summarizer and reviewer gets a single `SOURCE` file containing all the
 
 Overlap context is added automatically. Each part after the first opens with the final block or blocks of the previous part, wrapped in comment markers and excluded from `word_count` and `word_budget`. Set the number of blocks with `OVERLAP_BLOCKS` in `Work/split_parts.py` (default 1; 0 turns overlap off). The script drops overlap that would push a part over the hard cap.
 
-Overlap carries context only backward, so inspect every part boundary after splitting, using the split report and the `Work/check_parts.py` output. Add original-source context, from either direction, wherever a split separates a term from its definition, a claim from its evidence, or a passage from a qualification or conclusion in the next part. Also inspect every boundary where the script dropped overlap, and add any context it needs. If the context won't fit, reserve room or move the boundary, then recheck size and ownership.
+Overlap carries context only backward, so inspect every part boundary after splitting, using the split report and the `Work/check_parts.py` output. Add original-source context, from either direction, wherever a split separates a term from its definition, a claim from its evidence, or a passage from a qualification or conclusion in the next part. Also inspect every boundary where the script dropped overlap, and add any context it needs. Record added context in `Work/part_context.json`, not in the part files, so rerunning the splitter keeps it: each entry names the receiving part by `source_slug`, `unit_id`, `part_index`, and `part_count`, and gives the exact chapter text. The splitter locates the owning part, inserts the block, and reports entries it cannot match. If the context won't fit, reserve room or move the boundary, then recheck size and ownership.
 
 Each source passage belongs to exactly one part, and only that part summarizes it. Other parts may use it to interpret or qualify their own claims. Record any change of ownership in the parts manifest. Before merging, check adjacent summaries for duplicated coverage, keeping any qualifications needed for accuracy.
 

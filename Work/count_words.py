@@ -9,18 +9,15 @@ def words_in_text(text):
     The shared counting function for this project. It splits text on
     whitespace and counts non-empty tokens (regex ``\\S+``), so a
     hyphenated compound such as "well-known" counts as one word and a
-    number or date counts as one token. Lines starting with ``#``
-    (headings) are excluded, and so are lines that consist only of an
-    HTML comment (page markers and pipeline markers such as
-    ``<!-- page 12 -->``). YAML frontmatter is not stripped, so pass
-    body text only.
+    number or date counts as one token. HTML comments (page markers such
+    as ``<!-- page 12 -->`` and pipeline markers) are removed first,
+    wherever they sit, so a marker inside a word or sentence changes
+    nothing. Then lines starting with ``#`` (headings) are excluded. YAML
+    frontmatter is not stripped, so pass body text only.
     """
     kept = []
-    for line in text.splitlines():
-        s = line.strip()
+    for line in re.sub(r"<!--.*?-->", "", text, flags=re.S).splitlines():
         if line.startswith("#"):
-            continue
-        if s.startswith("<!--") and s.endswith("-->"):
             continue
         kept.append(line)
     return len(re.findall(r"\S+", "\n".join(kept)))

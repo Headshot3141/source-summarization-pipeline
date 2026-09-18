@@ -9,7 +9,9 @@ Chapters whose complete file is at or under the hard cap stay whole and
 are listed with their own path. Larger chapters are cut into parts. Each
 part owns an exact slice of the chapter body, stored between owned-text
 markers, so the ordered slices rebuild the chapter byte for byte. Text is
-never rewritten here; repairs belong in extraction.
+never rewritten here; repairs belong in extraction. A page marker stays
+with the text that follows it. Extra context for weak boundaries comes
+from Work/part_context.json (see CONTEXT_CONFIG), so reruns keep it.
 
 Writes Work/parts_manifest.json, Work/manifest.json, and
 Work/parts_report.txt. Statuses from a previous run are kept for units
@@ -24,11 +26,13 @@ from common import (
     HARD_CAP,
     OWNED_END,
     OWNED_START,
+    PAGE_MARKER_RE,
     ROOT,
     chapter_body,
     ends_sentence,
     is_heading,
     rel,
+    strip_comments,
     yaml_value,
 )
 from count_words import words_in_text
@@ -47,6 +51,19 @@ FILE_OVERHEAD = 1_500  # room for frontmatter, heading, and markers
 OVERLAP_BLOCKS = 1
 OVERLAP_START = "<!-- overlap context from the end of the previous part: use for reference only, do not re-summarize it, excluded from word_count and word_budget -->"
 OVERLAP_END = "<!-- end overlap context -->"
+
+# Extra original-source context for a part, added by the coordinator where a
+# boundary separates a term from its definition, a claim from its evidence,
+# and so on. Kept out of the part files so a rerun never loses it. Each entry:
+#   {"source_slug": ..., "unit_id": ..., "part_index": 2, "part_count": 3,
+#    "text": "exact chapter text", "reason": "optional note"}
+# The text must appear verbatim in the chapter body. The splitter finds the
+# part that owns it and places it before the owned text (earlier parts) or
+# after it (later parts). Entries whose part_index/part_count no longer exist
+# after a resplit are reported, not applied.
+CONTEXT_CONFIG = ROOT / "Work" / "part_context.json"
+CONTEXT_START = "<!-- context from {owner}, owned there: use for reference only, do not summarize it, excluded from word_count and word_budget -->"
+CONTEXT_END = "<!-- end context -->"
 
 SCRIPT_BLOCK_REASON = "part over hard cap"
 ABBREVIATIONS = {
@@ -123,7 +140,22 @@ def paragraph_units(body):
             merged[-1] = (merged[-1][0], b)
         else:
             merged.append((a, b))
-    return merged
+    # A marker-only span (a page marker set apart by a blank line) belongs to
+    # the text that follows it, so a part boundary never separates them.
+    out = []
+    pending = None
+    for a, b in merged:
+        if not strip_comments(body[a:b]).strip():
+            pending = a if pending is None else pending
+            continue
+        out.append((a if pending is None else pending, b))
+        pending = None
+    if pending is not None:
+        if out:
+            out[-1] = (out[-1][0], len(body))
+        else:
+            out.append((pending, len(body)))
+    return out
 
 
 def sentence_units(body, a, b):
@@ -131,7 +163,7 @@ def sentence_units(body, a, b):
     cuts = [a]
     for m in SENTENCE_GAP.finditer(body, a, b):
         pos = m.end()
-        if pos >= b or body[pos].islower():
+        if pos >= b or strip_comments(body[pos:min(b, pos + 200)]).lstrip()[:1].islower():
             continue
         last = re.search(r"(\S+)$", body[a:m.start()])
         word = last.group(1) if last else ""
@@ -162,7 +194,7 @@ def make_parts(body, limit):
     cur_start, cur_size, consumed = units[0][0], 0, 0
     for i, (a, b) in enumerate(units):
         s = sizes[i]
-        text = body[a:b].strip()
+        text = strip_comments(body[a:b]).strip()
         remaining = total - consumed
         can_break = (
             cur_size > 0
@@ -182,6 +214,23 @@ def make_parts(body, limit):
     return parts, oversized
 
 
+def part_pages(body, a, b, fallback):
+    """PDF page range "first-last" of body[a:b] from its page markers.
+
+    The first page is the marker at or before a, so a part that starts
+    mid-page gets that page. Falls back to the chapter's range when the
+    chapter has no markers.
+    """
+    marks = [(m.start(), int(m.group(1))) for m in PAGE_MARKER_RE.finditer(body)]
+    before = [n for pos, n in marks if pos <= a]
+    inside = [n for pos, n in marks if a < pos < b]
+    if not before and not inside:
+        return fallback
+    first = before[-1] if before else inside[0]
+    last = inside[-1] if inside else first
+    return "%d-%d" % (first, last)
+
+
 def overlap_blocks(body, prev_span, count):
     if count <= 0:
         return []
@@ -189,12 +238,61 @@ def overlap_blocks(body, prev_span, count):
     return [body[a:b].strip() for a, b in spans[-count:]]
 
 
-def render_part(fields, heading, overlap, owned):
+def context_block(owner, text):
+    return CONTEXT_START.format(owner=owner) + "\n\n" + text + "\n\n" + CONTEXT_END
+
+
+def render_part(fields, heading, overlap, owned, before=(), after=()):
+    """before/after: [(owner label, text)] extra context from other parts."""
     head = "---\n" + "".join(f"{k}: {yaml_value(v)}\n" for k, v in fields) + "---\n\n" + heading + "\n\n"
     context = ""
     if overlap:
         context = OVERLAP_START + "\n\n" + "\n\n".join(overlap) + "\n\n" + OVERLAP_END + "\n\n"
-    return head + context + OWNED_START + owned + OWNED_END + "\n"
+    context += "".join(context_block(o, t) + "\n\n" for o, t in before)
+    tail = "".join("\n\n" + context_block(o, t) for o, t in after)
+    return head + context + OWNED_START + owned + OWNED_END + tail + "\n"
+
+
+def load_context():
+    """Return ({(slug, unit, part_index, part_count): [entry]}, [problems])."""
+    if not CONTEXT_CONFIG.exists():
+        return {}, []
+    try:
+        entries = json.loads(CONTEXT_CONFIG.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        return {}, [f"{CONTEXT_CONFIG.name}: not valid JSON: {exc}"]
+    grouped, problems = {}, []
+    for n, e in enumerate(entries if isinstance(entries, list) else [], 1):
+        keys = ("source_slug", "unit_id", "part_index", "part_count", "text")
+        if not isinstance(e, dict) or any(not e.get(k) for k in keys):
+            problems.append(f"{CONTEXT_CONFIG.name} entry {n}: needs {', '.join(keys)}")
+            continue
+        key = (e["source_slug"], e["unit_id"], e["part_index"], e["part_count"])
+        grouped.setdefault(key, []).append(e)
+    if not isinstance(entries, list):
+        problems.append(f"{CONTEXT_CONFIG.name}: must be a JSON list")
+    return grouped, problems
+
+
+def place_context(entries, body, spans, k, unit, notes):
+    """Return (before, after) context blocks for part k from config entries."""
+    before, after = [], []
+    for e in entries:
+        text = e["text"]
+        pos = body.find(text)
+        if pos < 0:
+            notes.append(f"part {k}: context text not found verbatim in the chapter, not added: {text[:60]!r}")
+            continue
+        if body.count(text) > 1:
+            notes.append(f"part {k}: context text occurs more than once in the chapter; used the first: {text[:60]!r}")
+        end = pos + len(text)
+        owners = [j for j, (a, b) in enumerate(spans, 1) if a < end and pos < b]
+        if k in owners:
+            notes.append(f"part {k}: context text overlaps this part's own text, not added: {text[:60]!r}")
+            continue
+        label = f"{unit} part {owners[0]}" if len(owners) == 1 else f"{unit} parts {owners[0]}-{owners[-1]}"
+        (before if owners[-1] < k else after).append((label, text.strip()))
+    return before, after
 
 
 # ---------------------------------------------------------------- main
@@ -254,6 +352,8 @@ def main():
             print("  " + e)
         sys.exit(1)
 
+    contexts, context_problems = load_context()
+    used_contexts = set()
     old_parts = {(c["source_slug"], c["unit_id"]): c for c in load_json(PARTS_MANIFEST, [])}
     old_status = {(c["source_slug"], c["unit_id"]): c["status"] for c in load_json(CHAPTER_MANIFEST, [])}
 
@@ -280,7 +380,7 @@ def main():
                 "summary": summary,
                 "record": f"Work/Reviews/{slug}/{stem}.md",
                 "words": ch["words"], "budget": budget, "bytes": ch["bytes"],
-                "sha": ch["sha"], "status": "pending",
+                "sha": ch["sha"], "status": "pending", "context_from": [],
             })
         else:
             spans, oversized = make_parts(body, HARD_CAP - FILE_OVERHEAD)
@@ -300,7 +400,7 @@ def main():
                     ("part", meta.get("part")),
                     ("chapter", meta.get("chapter")),
                     ("title", meta.get("title", "")),
-                    ("pdf_pages", meta.get("pdf_pages", "")),
+                    ("pdf_pages", part_pages(body, a, b, meta.get("pdf_pages", ""))),
                     ("printed_pages", meta.get("printed_pages", "")),
                     ("part_index", k),
                     ("part_count", m),
@@ -311,10 +411,14 @@ def main():
                 owned = body[a:b]
                 want = OVERLAP_BLOCKS if k > 1 else 0
                 overlap = overlap_blocks(body, spans[k - 2], want) if k > 1 else []
-                content = render_part(fields, heading, overlap, owned)
+                ckey = (slug, unit, k, m)
+                before, after = place_context(contexts.get(ckey, []), body, spans, k, unit, notes)
+                if ckey in contexts:
+                    used_contexts.add(ckey)
+                content = render_part(fields, heading, overlap, owned, before, after)
                 while overlap and size(content) > HARD_CAP:
                     overlap = overlap[1:]
-                    content = render_part(fields, heading, overlap, owned)
+                    content = render_part(fields, heading, overlap, owned, before, after)
                 if k > 1 and len(overlap) < want:
                     notes.append(f"part {k}: overlap dropped to {len(overlap)} block(s) to stay under the cap; inspect this boundary")
                 data = content.encode("utf-8")
@@ -323,7 +427,8 @@ def main():
                 status = "pending"
                 if len(data) > HARD_CAP:
                     status = "blocked"
-                    notes.append(f"part {k}: {len(data)} bytes is over the {HARD_CAP}-byte cap; not assignable")
+                    fix = "; shorten the added context or move the boundary" if before or after else ""
+                    notes.append(f"part {k}: {len(data)} bytes is over the {HARD_CAP}-byte cap; not assignable{fix}")
                 units.append({
                     "part_index": k, "part_count": m,
                     "source": f"Work/Chapters/{slug}/parts/{pname}",
@@ -332,6 +437,7 @@ def main():
                     "record": f"Work/Reviews/{slug}/parts/{pname}",
                     "words": w, "budget": share, "bytes": len(data),
                     "sha": sha(data), "status": status,
+                    "context_from": [o for o, _ in before + after],
                 })
 
         # Remove part files left over from an earlier split of this chapter.
@@ -384,6 +490,13 @@ def main():
             f"budget {budget}, largest file {maxb} bytes, status {status}"
         )
         report.extend("  !! " + n for n in notes)
+
+    for slug, unit, k, m in sorted(set(contexts) - used_contexts):
+        context_problems.append(
+            f"{CONTEXT_CONFIG.name}: context for {slug}/{unit} part {k} of {m} matches no part "
+            f"(the chapter was resplit or is unsplit); re-inspect its boundaries and update the entry"
+        )
+    report.extend("  !! " + p for p in context_problems)
 
     PARTS_MANIFEST.write_text(json.dumps(parts_manifest, indent=1), encoding="utf-8", newline="\n")
     CHAPTER_MANIFEST.write_text(json.dumps(chapter_manifest, indent=1), encoding="utf-8", newline="\n")
