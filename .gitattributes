@@ -1,0 +1,4 @@
+# Keep LF line endings everywhere. The pipeline measures exact byte sizes
+# and rebuilds chapters byte for byte, so CRLF conversion would break checks.
+* text=auto eol=lf
+*.pdf binary

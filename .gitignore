@@ -1,0 +1,10 @@
+# Python caches
+__pycache__/
+*.pyc
+
+# Original source documents: large binaries that never change
+Sources/
+
+# Rendered and intermediate outputs, rebuilt from Summary.md
+Summary.pdf
+Work/summary.html
