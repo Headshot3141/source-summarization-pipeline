@@ -68,9 +68,12 @@ def owned_text(raw):
 
 
 def ends_sentence(text):
-    """True if text ends with terminal punctuation, allowing a footnote number."""
+    """True if text ends with terminal punctuation, allowing a footnote number.
+
+    Closing quotes and brackets after the punctuation are allowed: .’ .]
+    """
     t = text.rstrip()
-    return bool(t) and bool(re.search(r"[.!?…”)\"]\d{0,3}$", t))
+    return bool(t) and bool(re.search(r"([.!?…”)\"]|[.!?…][’'\]]+)\d{0,3}$", t))
 
 
 def is_heading(block):
