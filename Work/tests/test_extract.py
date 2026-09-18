@@ -160,6 +160,33 @@ class JoinLines(unittest.TestCase):
                          "see https://example.org/u-s-report.html.")
         self.assertEqual(log.rows, [])
 
+    def test_url_wrapped_after_slash_joins_without_space(self):
+        self.assertEqual(join_lines(["see https://example.org/reports/", "2019/annual.pdf for"]),
+                         "see https://example.org/reports/2019/annual.pdf for")
+        self.assertEqual(join_lines(["at https://example.org/search?q=", "war"]),
+                         "at https://example.org/search?q=war")
+
+    def test_url_wrapped_after_dot_joins_before_url_text(self):
+        self.assertEqual(join_lines(["at www.example.", "com/data."]), "at www.example.com/data.")
+        self.assertEqual(join_lines(["at https://data.", "example.org."]), "at https://data.example.org.")
+
+    def test_url_ending_a_sentence_keeps_the_space(self):
+        log = RepairLog()
+        self.assertEqual(join_lines(["see www.example.com.", "The next"], log=log),
+                         "see www.example.com. The next")
+        self.assertEqual(join_lines(["see www.example.com", "for details"], log=log),
+                         "see www.example.com for details")
+        self.assertEqual(log.rows, [])
+
+    def test_ambiguous_url_dot_is_logged(self):
+        log = RepairLog()
+        self.assertEqual(join_lines(["see www.example.com.", "then more"], log=log, page=4),
+                         "see www.example.com. then more")
+        self.assertEqual(log.kinds(), ["url-join-uncertain"])
+
+    def test_plain_slash_word_is_not_a_url_wrap_unless_it_ends_in_slash(self):
+        self.assertEqual(join_lines(["either and/or.", "Next"]), "either and/or. Next")
+
 
 class Headings(unittest.TestCase):
     def test_heading_with_note_number(self):

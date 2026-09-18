@@ -25,12 +25,12 @@ Fixed. Tests are in `Work/tests/test_pipeline.py`. Extra part context now lives 
 ## Low: robustness
 
 - [x] **The path check in `assemble.py` uses a plain prefix test.** At `Work/assemble.py:31`, a sibling folder such as `summarise2` would pass. Compare resolved paths with `Path.is_relative_to` instead.
-- [ ] **`build_pdf.py` only finds Edge in two fixed locations.** At `Work/build_pdf.py:67`, the script ignores PATH, although `requirements.txt` says Edge on PATH works. Try `shutil.which("msedge")` first.
-- [ ] **`build_pdf.py` builds the file URL by hand.** At `Work/build_pdf.py:82`, a path containing `#`, `%` or spaces breaks the URL. Use `pathlib.Path(HTML).as_uri()`.
-- [ ] **`build_pdf.py` ignores Edge's exit code and uses the default profile.** At `Work/build_pdf.py:91`, errors are hidden, and an open Edge window can interfere with printing. Check the return code, report stderr on failure, and pass a temporary `--user-data-dir`.
+- [x] **`build_pdf.py` only finds Edge in two fixed locations.** At `Work/build_pdf.py:67`, the script ignores PATH, although `requirements.txt` says Edge on PATH works. Try `shutil.which("msedge")` first.
+- [x] **`build_pdf.py` builds the file URL by hand.** At `Work/build_pdf.py:82`, a path containing `#`, `%` or spaces breaks the URL. Use `pathlib.Path(HTML).as_uri()`.
+- [x] **`build_pdf.py` ignores Edge's exit code and uses the default profile.** At `Work/build_pdf.py:91`, errors are hidden, and an open Edge window can interfere with printing. Check the return code, report stderr on failure, and pass a temporary `--user-data-dir`.
 - [ ] **Sentence splitting relies on a fixed abbreviation list.** `ABBREVIATIONS` (`Work/split_parts.py:52`) covers common cases only. It also treats any one-letter word followed by a period as an initial, so a sentence ending in "I." won't split there. This only matters for paragraphs too large for one part. Review any such splits in the split report.
 
-- [ ] **URLs broken across lines get a space.** When a URL wraps at a `/` or `.` rather than a hyphen, `join_lines` joins the two lines with a space, splitting the URL. This mostly affects notes sections, which are usually omitted as apparatus. If notes are kept, join without a space when the left token is URL-like and doesn't end a sentence.
+- [x] **URLs broken across lines get a space.** When a URL wraps at a `/` or `.` rather than a hyphen, `join_lines` joins the two lines with a space, splitting the URL. This mostly affects notes sections, which are usually omitted as apparatus. If notes are kept, join without a space when the left token is URL-like and doesn't end a sentence. Fixed in `url_continues`; a dot before a lowercase word that doesn't look like URL text keeps the space and is logged as `url-join-uncertain`. Tested in `Work/tests/test_extract.py`.
 
 ## Verification after fixes
 

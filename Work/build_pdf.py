@@ -1,6 +1,8 @@
 import os
+import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 
 import markdown
 import pymupdf
@@ -63,10 +65,13 @@ strong { font-weight: bold; }
 
 
 def find_edge():
+    on_path = shutil.which("msedge")
+    if on_path:
+        return on_path
     for path in EDGE:
         if os.path.exists(path):
             return path
-    raise SystemExit("Microsoft Edge not found")
+    raise SystemExit("Microsoft Edge not found on PATH or in: " + ", ".join(EDGE))
 
 
 def render_html():
@@ -79,19 +84,28 @@ def render_html():
 
 
 def print_pdf(edge, tmp_pdf):
-    url = "file:///" + HTML.replace("\\", "/")
-    base = [edge, "--no-first-run", "--no-default-browser-check",
-            "--disable-gpu", "--run-all-compositor-stages-before-draw",
-            "--virtual-time-budget=10000",
-            "--no-pdf-header-footer", "--print-to-pdf-no-header"]
-    for mode in ("--headless=new", "--headless"):
-        if os.path.exists(tmp_pdf):
-            os.remove(tmp_pdf)
-        cmd = base + [mode, "--print-to-pdf=" + tmp_pdf, url]
-        subprocess.run(cmd, capture_output=True, timeout=180)
-        if os.path.exists(tmp_pdf) and os.path.getsize(tmp_pdf) > 0:
-            return
-    raise SystemExit("Edge failed to produce a PDF")
+    url = Path(HTML).resolve().as_uri()
+    failures = []
+    # A separate profile keeps an open Edge window from taking over the print job.
+    with tempfile.TemporaryDirectory(prefix="edge-profile-") as profile:
+        base = [edge, "--no-first-run", "--no-default-browser-check",
+                "--user-data-dir=" + profile,
+                "--disable-gpu", "--run-all-compositor-stages-before-draw",
+                "--virtual-time-budget=10000",
+                "--no-pdf-header-footer", "--print-to-pdf-no-header"]
+        for mode in ("--headless=new", "--headless"):
+            if os.path.exists(tmp_pdf):
+                os.remove(tmp_pdf)
+            cmd = base + [mode, "--print-to-pdf=" + tmp_pdf, url]
+            result = subprocess.run(cmd, capture_output=True, text=True,
+                                    errors="replace", timeout=180)
+            produced = os.path.exists(tmp_pdf) and os.path.getsize(tmp_pdf) > 0
+            if result.returncode == 0 and produced:
+                return
+            failures.append("%s: exit %d%s\n%s" % (
+                mode, result.returncode, "" if produced else ", no PDF",
+                result.stderr.strip() or "(no stderr)"))
+    raise SystemExit("Edge failed to produce a PDF\n" + "\n".join(failures))
 
 
 def add_page_numbers(tmp_pdf):

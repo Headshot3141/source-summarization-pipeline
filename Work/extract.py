@@ -74,6 +74,7 @@ class RepairLog:
       block-join-uncertain
       page-break-unjoined                 page ends without closing punctuation but was not joined
       furniture-dropped                   bare page number or date stamp in a margin zone
+      url-join-uncertain                  URL line ends in a dot before a lowercase word; space kept
     """
 
     COLUMNS = ("unit_id", "pdf_page", "kind", "detail")
@@ -259,6 +260,33 @@ def join_hyphenated(left, right, ev=NO_EVIDENCE, log=None, page=None, marker="")
     return (left if keep else left[:-1]) + marker + right
 
 
+URL_WRAP_CHARS = "/?&=#_~%"
+
+
+def url_continues(left, right, log=None, page=None):
+    """Whether right continues a URL that wrapped at the end of left.
+
+    A URL broken after a slash or query character always continues. One
+    broken after a dot continues only if left is a full URL and the next
+    token also looks like URL text (com/path, example.org); otherwise the
+    dot may end a sentence, so the space is kept and a lowercase
+    continuation is logged for review.
+    """
+    token = left.rsplit(None, 1)[-1]
+    if not is_url(token):
+        return False
+    if token[-1] in URL_WRAP_CHARS:
+        return True
+    if token[-1] != "." or not ("://" in token or token.startswith("www.")):
+        return False
+    head = re.sub(r"[.,;:!?)\]'\"]+$", "", right.split(None, 1)[0])
+    if re.search(r"[/.?=#]", head):
+        return True
+    if right[:1].islower():
+        _log(log, page, "url-join-uncertain", "%s / %s (kept space)" % (token, head))
+    return False
+
+
 def join_lines(lines, ev=NO_EVIDENCE, log=None, page=None):
     text = ""
     for ln in lines:
@@ -269,6 +297,8 @@ def join_lines(lines, ev=NO_EVIDENCE, log=None, page=None):
             text = ln
         elif re.search(r"[A-Za-z0-9]-$", text):
             text = join_hyphenated(text, ln, ev, log, page)
+        elif url_continues(text, ln, log, page):
+            text = text + ln
         else:
             text = text + " " + ln
     return re.sub(r"\s+", " ", text).strip()
