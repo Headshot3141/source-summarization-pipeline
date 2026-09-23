@@ -136,11 +136,26 @@ class JoinLines(unittest.TestCase):
         self.assertEqual(join_lines(["the popu-", "lation"], log=log, page=7), "the population")
         self.assertEqual(log.rows, [("", 7, "hyphen-removed", "popu- / lation -> population (dictionary)")])
 
-    def test_unknown_join_keeps_hyphen_and_is_logged(self):
+    def test_compound_of_two_known_words_keeps_hyphen_and_is_logged(self):
         log = RepairLog()
         self.assertEqual(join_lines(["a well-", "known fact"], log=log), "a well-known fact")
         self.assertEqual(log.kinds(), ["hyphen-kept"])
-        self.assertIn("unverified", log.rows[0][3])
+        self.assertIn("uncertain", log.rows[0][3])
+        self.assertEqual(join_lines(["poverty-", "stricken towns"]), "poverty-stricken towns")
+
+    def test_known_prefix_keeps_hyphen(self):
+        log = RepairLog()
+        self.assertEqual(join_lines(["a non-", "antagonistic view"], log=log), "a non-antagonistic view")
+        self.assertIn("(prefix)", log.rows[0][3])
+
+    def test_acronym_stem_keeps_hyphen(self):
+        self.assertEqual(join_lines(["the NATO-", "led force"]), "the NATO-led force")
+
+    def test_unverifiable_break_in_hyphenating_document_joins_and_is_logged(self):
+        log = RepairLog()
+        self.assertEqual(join_lines(["the Zwor-", "kowski estate"], log=log), "the Zworkowski estate")
+        self.assertEqual(log.kinds(), ["hyphen-removed"])
+        self.assertIn("uncertain", log.rows[0][3])
 
     def test_compound_of_two_words_is_flagged(self):
         log = RepairLog()
@@ -289,6 +304,77 @@ class Extractor(unittest.TestCase):
             "1990",
         ])
         self.assertEqual(log.kinds(), ["furniture-dropped", "furniture-dropped", "heading-stripped", "page-join"])
+
+
+class Ligatures(unittest.TestCase):
+    def test_presentation_forms_are_expanded(self):
+        spans = [{"font": "F", "size": 10, "chars": [
+            {"c": c, "bbox": (i * 5, 0, i * 5 + 5, 10)} for i, c in enumerate("ﬁrst ﬄuid")]}]
+        self.assertEqual(extract.line_text(spans), "first ffluid")
+
+
+class SpaceRepair(unittest.TestCase):
+    def chars(self, groups):
+        out, x = [], 0
+        for word in groups:
+            for c in word:
+                out.append({"c": c, "bbox": (x, 0, x + 5, 10)})
+                x += 5
+            x += 3  # a gap with no space glyph
+        return [{"font": "Serif", "size": 10, "chars": out}]
+
+    def test_gap_without_space_glyph_gets_a_space_for_listed_font(self):
+        spans = self.chars(["the", "war"])
+        self.assertEqual(extract.line_text(spans), "thewar")
+        self.assertEqual(extract.line_text(spans, {"Serif": 0.2}), "the war")
+
+    def test_gap_below_threshold_is_not_a_space(self):
+        self.assertEqual(extract.line_text(self.chars(["the", "war"]), {"Serif": 0.5}), "thewar")
+
+
+class AltTitle(unittest.TestCase):
+    def test_alternate_heading_spelling_is_stripped(self):
+        paras = ["2", "The Silent Sprinq", "Body text."]
+        out = strip_chapter_heading(paras, "The Silent Spring", 2, alt=["The Silent Sprinq"])
+        self.assertEqual(out, ["Body text."])
+
+
+class Epub(unittest.TestCase):
+    XHTML = (
+        '<html><head><title>x</title></head><body>'
+        '<h2 class="chno"><a id="page_11"/>1</h2>'
+        '<h2 class="chtitle">The Title</h2>'
+        '<p>First paragraph runs on to <a id="page_12"/>the next page.</p>'
+        '<p><a id="page_13"/>Second paragraph.</p>'
+        '</body></html>'
+    )
+
+    def test_headings_dropped_and_page_markers_kept(self):
+        paras = extract.epub_paragraphs(self.XHTML, {"unit_id": "ch-01", "title": "The Title"},
+                                        heading_classes=["chno", "chtitle"])
+        self.assertEqual(paras, [
+            "<!-- page 11 -->",
+            "First paragraph runs on to <!-- page 12 --> the next page.",
+            "<!-- page 13 -->\nSecond paragraph.",
+        ])
+
+    def test_custom_anchor_and_heading_classes(self):
+        xhtml = ('<body><h1 class="chapter-head"><span id="pg5"></span>Title</h1>'
+                 '<p>Body.</p></body>')
+        paras = extract.epub_paragraphs(xhtml, {"unit_id": "ch-01", "title": "Title"},
+                                        anchor="pg", heading_classes=["chapter-head"])
+        self.assertEqual(paras, ["<!-- page 5 -->", "Body."])
+
+    def test_missing_heading_is_logged(self):
+        log = RepairLog()
+        extract.epub_paragraphs("<body><p>Body.</p></body>", {"unit_id": "ch-01", "title": "T"}, log)
+        self.assertEqual(log.kinds(), ["heading-not-found"])
+
+
+class LonePunctuation(unittest.TestCase):
+    def test_stray_period_block_is_dropped(self):
+        self.assertTrue(extract.LONE_PUNCT.match("."))
+        self.assertFalse(extract.LONE_PUNCT.match("1990"))
 
 
 if __name__ == "__main__":

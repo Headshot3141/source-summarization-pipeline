@@ -193,6 +193,19 @@ class Assemble(unittest.TestCase):
         self.assertNotIn("## Two", text)
         self.assertIn("PARTIAL", out)
 
+    def test_pilot_units_assemble_only_the_pilot(self):
+        self.write(["## One\n\nThe pilot chapter.\n", "## Two\n\nText.\n"], {2: "pending"})
+        saved = assemble.PILOT_UNITS
+        assemble.PILOT_UNITS = [("src", "ch-01")]
+        try:
+            code, out = self.run_main()
+        finally:
+            assemble.PILOT_UNITS = saved
+        self.assertEqual(code, 0, out)
+        text = assemble.OUT.read_text(encoding="utf-8")
+        self.assertIn("## One", text)
+        self.assertNotIn("## Two", text)
+
     def test_sibling_folder_path_is_rejected(self):
         self.write(["## One\n\nText.\n"])
         manifest = json.loads(assemble.MANIFEST.read_text(encoding="utf-8"))

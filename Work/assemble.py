@@ -26,9 +26,15 @@ MANIFEST = ROOT / "Work" / "manifest.json"
 PARTS_MANIFEST = ROOT / "Work" / "parts_manifest.json"
 OUT = ROOT / "Summary.md"
 
+# One (source_slug, heading) pair per source, in part order. Name the source
+# and its author(s) in the heading, e.g. "# Part 1: {Title} by {Author}".
 PARTS = [
     ("", "# Part 1: {Title}"),
 ]
+
+# Pilot mode: when non-empty, assemble only these (source_slug, unit_id)
+# accepted units and skip the unfinished-unit check. Empty for the full run.
+PILOT_UNITS = []
 
 INTRO = """# Introduction
 
@@ -122,6 +128,10 @@ def check_text(text, problems):
 def main():
     manifest = load_manifest()
     problems = []
+
+    pilot = {tuple(key) for key in PILOT_UNITS}
+    if pilot:
+        manifest = [e for e in manifest if (e["source_slug"], e["unit_id"]) in pilot]
 
     unfinished = [e for e in manifest if e["status"] not in ("accepted", "blocked")]
     for e in unfinished:

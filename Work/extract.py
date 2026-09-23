@@ -1,5 +1,8 @@
 import os
 import re
+import zipfile
+from html.parser import HTMLParser
+
 import pymupdf
 from spellchecker import SpellChecker
 
@@ -13,10 +16,18 @@ RAW = os.path.join(ROOT, "Work", "Raw")
 
 sp = SpellChecker()
 
+# Recurring page furniture that position alone cannot catch. Add one
+# pattern per verified stamp. Example: page numbers printed as "-3-" or
+# "-xii-" that can sit mid-page:
+#     re.compile(r"^-\s*(?:\d{1,4}|[ivxlcdm]{1,7})\s*-$", re.I),
 STAMP_PATTERNS = []
+# Whole lines (normalized: lowercased, whitespace collapsed) that are
+# watermarks or download stamps, such as a site name printed on every page.
 JUNK_LINES = set()
 DATE = re.compile(r"^\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2}$")
 BARE_NUM = re.compile(r"^\d{1,4}$")
+# A block of only punctuation carries no content (stray periods at chapter ends).
+LONE_PUNCT = re.compile(r"^[.,;:!?\u2026'\"*\u00b7\u2022\u2013\u2014-]{1,3}$")
 OVERLAP_THRESHOLD = 1.6
 # Bare numbers and date stamps are page furniture only when they are the first
 # or last block on the page and sit within this fraction of the page height
@@ -25,6 +36,22 @@ PAGE_NUM_ZONE = 0.12
 # A chapter heading is looked for only in the first few blocks of its first page.
 MAX_HEADING_BLOCKS = 4
 WORD = re.compile(r"[A-Za-z][A-Za-z\u2019'-]*[A-Za-z]")
+# Presentation-form ligatures (ff, fi, fl, ffi, ffl, st) are normalized to
+# their letter sequences. The mapping is unambiguous, so no log is needed.
+LIGATURES = {
+    "\ufb00": "ff", "\ufb01": "fi", "\ufb02": "fl", "\ufb03": "ffi",
+    "\ufb04": "ffl", "\ufb05": "st", "\ufb06": "st",
+}
+LIGATURE_TABLE = str.maketrans(LIGATURES)
+# A line-end hyphen after a known prefix is kept as a compound hyphen.
+PREFIXES = {
+    "anti", "auto", "bi", "bio", "co", "counter", "cross", "crypto", "de",
+    "dis", "ex", "extra", "geo", "hyper", "il", "im", "in", "inter", "ir",
+    "macro", "meta", "micro", "mid", "mis", "mono", "multi", "neo", "non",
+    "over", "pan", "para", "post", "pre", "pro", "proto", "pseudo", "quasi",
+    "re", "semi", "socio", "sub", "super", "techno", "trans", "ultra", "un",
+    "under", "uni", "vice",
+}
 # A document "hyphenates" (breaks words at line ends) when at least this many
 # line-end hyphens, and this share of those the document itself settles, are
 # line-break hyphens. Otherwise every line-end hyphen is kept as real text.
@@ -36,19 +63,47 @@ LIST_MARKER = re.compile(r"^(\(?(\d{1,3}|[A-Za-z]|[ivxlcdm]{1,5})[.)]|[\u2022\u2
 
 SOURCES_CONFIG = [
     {
+        # PDF source.
         "slug": "",
         "pdf": "",
         "title": "",
         "part": 1,
+        # Text above header_ymax or below footer_ymin (PDF points) is dropped.
+        # 0 and 10000 turn the cutoffs off.
         "header_ymax": 0,
         "footer_ymin": 10000,
-        # Optional "hyphenates": True/False overrides line-end hyphenation detection.
+        # Optional "hyphenates": True/False overrides line-end hyphenation
+        # detection. Set it when the detector disagrees with the page images.
+        # Optional "space_repair": {font name: em factor}. Use when a text
+        # layer drops the space glyph in some fonts, leaving only a gap; a
+        # space is inserted where the gap exceeds factor * font size. Calibrate
+        # the factor against known word gaps (0.08 worked on one serif face).
         "chapters": [
             # unit_id: stable and unique within this source (ch-01, appendix-a, ...).
             # slug: used in the filename. num: printed chapter label, or None if none.
+            # start/end: one-based inclusive PDF pages.
+            # Optional title_alt: extra heading spellings to strip, such as a
+            # heading with an OCR error ("The Silent Sprinq").
             {"unit_id": "", "slug": "", "title": "", "start": 1, "end": 1, "num": None, "printed_pages": ""},
         ],
     },
+    # EPUB source. Prefer an EPUB when the PDF text layer is damaged (wrong
+    # ligature glyphs, missing spaces). Each chapter names its XHTML file in
+    # the archive. Page markers come from print-page anchors whose id starts
+    # with epub_page_anchor ("page_" for <a id="page_12"/>); without anchors
+    # the chapter has no page markers. epub_heading_classes lists the class
+    # attributes of the heading elements to drop (chapter number and title).
+    # {
+    #     "slug": "",
+    #     "epub": "",
+    #     "title": "",
+    #     "part": 2,
+    #     "epub_page_anchor": "page_",
+    #     "epub_heading_classes": ["chno", "chtitle"],
+    #     "chapters": [
+    #         {"unit_id": "ch-01", "slug": "", "title": "", "num": 1, "file": "OEBPS/ch01.xhtml", "printed_pages": ""},
+    #     ],
+    # },
 ]
 
 
@@ -102,7 +157,7 @@ def _log(log, page, kind, detail):
         log.add(page, kind, detail)
 
 
-def heading_forms(title, num=None):
+def heading_forms(title, num=None, alt=None):
     """Normalized strings that count as a complete chapter heading."""
     t = headnorm(title or "")
     n = headnorm(str(num)) if num not in (None, "") else ""
@@ -113,17 +168,24 @@ def heading_forms(title, num=None):
         forms.add(t)
     if n and t:
         forms |= {n + " " + t, "chapter " + n + " " + t}
+    for extra in (alt or []):
+        e = headnorm(extra)
+        if e:
+            forms.add(e)
+            if n:
+                forms |= {n + " " + e, "chapter " + n + " " + e}
     return forms
 
 
-def strip_chapter_heading(paras, title, num=None, log=None, page=None):
+def strip_chapter_heading(paras, title, num=None, log=None, page=None, alt=None):
     """Remove the chapter heading from the first blocks of a chapter's first page.
 
     Strips leading blocks that, alone or together, spell the chapter number or
     title (a title can be broken over several blocks). Stops at the first block
-    that does not, so body text is never removed.
+    that does not, so body text is never removed. alt lists extra heading
+    spellings, such as a corrected title whose source heading has an OCR error.
     """
-    forms = heading_forms(title, num)
+    forms = heading_forms(title, num, alt)
     if not forms:
         return list(paras)
     done, acc = 0, ""
@@ -160,23 +222,41 @@ def ov(a, b):
     return min(a[2], b[2]) - max(a[0], b[0])
 
 
-def line_text(chars):
+def line_text(spans, space_repair=None):
+    """Join one line's characters into text.
+
+    Artifact spaces (a space glyph overlapping a real glyph) are dropped.
+    Some PDFs omit the space character at word boundaries, leaving only a
+    horizontal gap; for a font listed in space_repair (font name -> em
+    factor) a space is inserted when the gap before a character exceeds
+    factor * font size and neither neighbour is already a space.
+    """
+    chars = [(c, s["font"], s["size"]) for s in spans for c in s["chars"]]
     out = []
+    prev = None
     n = len(chars)
-    for i, c in enumerate(chars):
+    for i, (c, font, size) in enumerate(chars):
         ch = c["c"]
         if ch == " ":
             artifact = False
             for j in range(n):
-                if j == i or chars[j]["c"] == " ":
+                if j == i or chars[j][0]["c"] == " ":
                     continue
-                if ov(c["bbox"], chars[j]["bbox"]) > OVERLAP_THRESHOLD:
+                if ov(c["bbox"], chars[j][0]["bbox"]) > OVERLAP_THRESHOLD:
                     artifact = True
                     break
             if artifact:
                 continue
+            out.append(ch)
+            prev = c
+            continue
+        factor = (space_repair or {}).get(font)
+        if factor and prev is not None and prev["c"] != " ":
+            if c["bbox"][0] - prev["bbox"][2] > factor * size:
+                out.append(" ")
         out.append(ch)
-    return "".join(out)
+        prev = c
+    return "".join(out).translate(LIGATURE_TABLE)
 
 
 def is_url(token):
@@ -222,22 +302,37 @@ NO_EVIDENCE = DocEvidence()
 
 
 def hyphen_decision(stem, first, ev):
-    """Return (keep_hyphen, basis) for a word broken as stem- / first."""
+    """Return (separator, basis) for a word broken as stem- / first.
+
+    Separator is "-" to keep the hyphen or "" to join the fragments into one
+    word. Document evidence wins. A dictionary confirms a joined word. A
+    known prefix, an acronym stem, or two known words keep the hyphen: a
+    compound such as well- / known or poverty- / stricken must not lose it.
+    Otherwise, in a document that hyphenates, an unverifiable line-end
+    hyphen is taken as a word break and the fragments are joined.
+    """
     if not ev.hyphenates:
-        return True, "document does not break words at line ends"
+        return "-", "document does not break words at line ends"
     joined, hyphened = (stem + first).lower(), (stem + "-" + first).lower()
     in_joined, in_hyphened = joined in ev.forms, hyphened in ev.forms
     if in_hyphened and not in_joined:
-        return True, "document"
+        return "-", "document"
     if in_joined and not in_hyphened:
-        return False, "document"
+        return "", "document"
     if in_joined and in_hyphened:
-        return True, "uncertain: document has both forms"
+        return "-", "uncertain: document has both forms"
+    stem_known, first_known = is_known(stem), is_known(first)
     if is_known(joined):
-        if is_known(stem) and is_known(first):
-            return False, "uncertain: dictionary, but both parts are words"
-        return False, "dictionary"
-    return True, "unverified"
+        if stem_known and first_known:
+            return "", "uncertain: dictionary, but both parts are words"
+        return "", "dictionary"
+    if stem.isupper() and len(stem) >= 2:
+        return "-", "acronym compound"
+    if stem.lower() in PREFIXES:
+        return "-", "prefix"
+    if stem_known and first_known:
+        return "-", "uncertain: both parts are words"
+    return "", "uncertain: unverified, document hyphenates"
 
 
 def join_hyphenated(left, right, ev=NO_EVIDENCE, log=None, page=None, marker=""):
@@ -254,10 +349,11 @@ def join_hyphenated(left, right, ev=NO_EVIDENCE, log=None, page=None, marker="")
     if not m or not stem or is_url(token):
         return left + marker + right
     first = m.group(0)
-    keep, basis = hyphen_decision(stem, first, ev)
-    word = stem + ("-" if keep else "") + first
-    _log(log, page, "hyphen-kept" if keep else "hyphen-removed", "%s- / %s -> %s (%s)" % (stem, first, word, basis))
-    return (left if keep else left[:-1]) + marker + right
+    sep, basis = hyphen_decision(stem, first, ev)
+    word = stem + sep + first
+    kind = "hyphen-kept" if sep == "-" else "hyphen-removed"
+    _log(log, page, kind, "%s- / %s -> %s (%s)" % (stem, first, word, basis))
+    return (left if sep == "-" else left[:-1]) + marker + right
 
 
 URL_WRAP_CHARS = "/?&=#_~%"
@@ -310,7 +406,7 @@ def in_margin_zone(bbox, page):
     return bbox[3] <= r.y0 + zone or bbox[1] >= r.y1 - zone
 
 
-def block_paragraphs(page, header_ymax, footer_ymin, ev=NO_EVIDENCE, log=None):
+def block_paragraphs(page, header_ymax, footer_ymin, ev=NO_EVIDENCE, log=None, space_repair=None):
     page_no = page.number + 1
     blocks = []
     for b in page.get_text("rawdict")["blocks"]:
@@ -323,8 +419,7 @@ def block_paragraphs(page, header_ymax, footer_ymin, ev=NO_EVIDENCE, log=None):
             continue
         lines = []
         for l in b.get("lines", []):
-            chars = [c for s in l["spans"] for c in s["chars"]]
-            lines.append(line_text(chars))
+            lines.append(line_text(l["spans"], space_repair))
         text = join_lines(lines, ev, log, page_no)
         if text:
             blocks.append((text, b["bbox"]))
@@ -332,12 +427,172 @@ def block_paragraphs(page, header_ymax, footer_ymin, ev=NO_EVIDENCE, log=None):
     for i, (text, bbox) in enumerate(blocks):
         if norm(text) in JUNK_LINES or any(p.match(text) for p in STAMP_PATTERNS):
             continue
+        if LONE_PUNCT.match(text):
+            _log(log, page_no, "furniture-dropped", text)
+            continue
         edge = i == 0 or i == len(blocks) - 1
         if (BARE_NUM.match(text) or DATE.match(text)) and edge and in_margin_zone(bbox, page):
             _log(log, page_no, "furniture-dropped", text)
             continue
         paras.append(text)
     return paras
+
+
+# ---------------------------------------------------------------- EPUB
+
+MARK = "\x00%d\x00"
+MARK_RE = re.compile("\x00(\\d+)\x00")
+
+
+DEFAULT_PAGE_ANCHOR = "page_"
+# No default: heading markup differs between publishers. Set
+# epub_heading_classes per source after opening one chapter file.
+DEFAULT_HEADING_CLASSES = ()
+
+
+class EpubText(HTMLParser):
+    """Collect block texts from EPUB XHTML, with page anchors kept inline.
+
+    Print page boundaries are anchored as elements whose id is the anchor
+    prefix plus the page number (<a id="page_12"/> by default); they become
+    sentinel markers that epub_paragraphs turns into <!-- page N -->.
+    Elements whose class is in skip_classes are dropped with their content,
+    except for any page anchors inside them.
+    """
+
+    BLOCK = {"p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "br", "tr", "blockquote"}
+    VOID = {"br", "img", "hr", "meta", "link", "input", "col", "area", "base", "wbr", "source"}
+
+    def __init__(self, anchor=DEFAULT_PAGE_ANCHOR, skip_classes=()):
+        super().__init__(convert_charrefs=True)
+        self.anchor = anchor
+        self.skip_classes = set(skip_classes)
+        self.blocks = []
+        self.cur = ""
+        self.skip = 0
+        self.dropped = 0          # nesting depth inside a skipped heading element
+        self.dropped_seen = 0     # skipped elements found
+        self.first_anchor = None  # first page anchor inside a skipped element
+
+    def page_of(self, attrs):
+        ident = dict(attrs).get("id") or ""
+        if self.anchor and ident.startswith(self.anchor):
+            n = ident[len(self.anchor):]
+            if n.isdigit():
+                return int(n)
+        return None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        page = self.page_of(attrs)
+        if self.dropped:
+            if tag not in self.VOID:
+                self.dropped += 1
+            if page is not None and self.first_anchor is None:
+                self.first_anchor = page
+            return
+        classes = set((a.get("class") or "").split())
+        if classes & self.skip_classes and tag not in self.VOID:
+            self.flush()
+            self.dropped = 1
+            self.dropped_seen += 1
+            if page is not None and self.first_anchor is None:
+                self.first_anchor = page
+            return
+        if tag in ("script", "style", "head", "title"):
+            self.skip += 1
+        elif page is not None:
+            self.cur += MARK % page
+        elif tag in self.BLOCK:
+            self.flush()
+
+    def handle_startendtag(self, tag, attrs):
+        page = self.page_of(attrs)
+        if page is not None:
+            if self.dropped:
+                if self.first_anchor is None:
+                    self.first_anchor = page
+            else:
+                self.cur += MARK % page
+        elif not self.dropped and tag in self.BLOCK:
+            self.flush()
+
+    def handle_endtag(self, tag):
+        if self.dropped:
+            self.dropped -= 1
+            return
+        if tag in ("script", "style", "head", "title"):
+            if self.skip:
+                self.skip -= 1
+        elif tag in self.BLOCK:
+            self.flush()
+
+    def handle_data(self, data):
+        if not self.skip and not self.dropped:
+            self.cur += data
+
+    def flush(self):
+        t = re.sub(r"\s+", " ", self.cur).strip()
+        if t:
+            self.blocks.append(t)
+        self.cur = ""
+
+
+def epub_paragraphs(raw, ch, log=None, anchor=DEFAULT_PAGE_ANCHOR, heading_classes=DEFAULT_HEADING_CLASSES):
+    """Return block paragraphs for one EPUB chapter, with page markers.
+
+    Heading elements whose class is in heading_classes are dropped (their
+    text lives in the frontmatter); a page anchor inside one still marks the
+    chapter's first page. A page anchor that opens a paragraph gets its
+    marker on its own line; one inside a paragraph stays inline at the seam.
+    """
+    if log is not None:
+        log.unit = ch["unit_id"]
+    parser = EpubText(anchor, heading_classes)
+    parser.feed(raw)
+    parser.flush()
+    paras = []
+    for block in parser.blocks:
+        text = MARK_RE.sub(lambda mm: PAGE_MARKER % int(mm.group(1)), block)
+        text = re.sub(r"(<!-- page \d+ -->)\s*", r"\1 ", text)
+        text = re.sub(r"^(<!-- page \d+ -->) ", r"\1\n", text).strip()
+        if text:
+            paras.append(text)
+    if parser.first_anchor is not None:
+        paras.insert(0, PAGE_MARKER % parser.first_anchor)
+    if not parser.dropped_seen:
+        _log(log, None, "heading-not-found", ch["title"])
+    return paras
+
+
+def make_epub_extractor(cfg, log=None):
+    path = os.path.join(SOURCES, cfg["epub"])
+    anchor = cfg.get("epub_page_anchor", DEFAULT_PAGE_ANCHOR)
+    classes = cfg.get("epub_heading_classes", DEFAULT_HEADING_CLASSES)
+
+    def extractor(ch):
+        with zipfile.ZipFile(path) as z:
+            raw = z.read(ch["file"]).decode("utf-8")
+        return epub_paragraphs(raw, ch, log, anchor, classes)
+
+    return extractor
+
+
+def save_epub_raw(cfg):
+    """Save each chapter file's text, before cleanup, to Work/Raw/{slug}/raw.txt."""
+    folder = os.path.join(RAW, cfg["slug"])
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "raw.txt")
+    with zipfile.ZipFile(os.path.join(SOURCES, cfg["epub"])) as z:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            for ch in cfg["chapters"]:
+                f.write("<!-- file %s -->\n\n" % ch["file"])
+                parser = EpubText(cfg.get("epub_page_anchor", DEFAULT_PAGE_ANCHOR))
+                parser.feed(z.read(ch["file"]).decode("utf-8"))
+                parser.flush()
+                blocks = [MARK_RE.sub(lambda m: PAGE_MARKER % int(m.group(1)), b) for b in parser.blocks]
+                f.write("\n\n".join(blocks) + "\n")
+    return path
 
 
 def last_alpha(text):
@@ -394,8 +649,9 @@ def join_across(a, b, ev, log, where, kind="page-join", marker=""):
     seam = "...%s | %s..." % (a[-30:], b[:30])
     lower = b[:1].islower()
     lw_known = is_known(lw)
+    first_known = bool(fw) and is_known(fw)
     joined_known = bool(fw) and ((lw + fw).lower() in ev.forms or is_known(lw + fw))
-    if lower and not lw_known and joined_known:
+    if lower and joined_known and not (lw_known and first_known):
         _log(log, where, kind + "-midword", "%s -> %s" % (seam, lw + fw))
         return a + marker + b
     # A word break needs a known last word and a lowercase continuation;
@@ -451,12 +707,12 @@ def make_extractor(cfg, log=None):
         pages = []
         with pymupdf.open(path) as doc:
             for p in range(ch["start"] - 1, ch["end"]):
-                paras = block_paragraphs(doc[p], cfg["header_ymax"], cfg["footer_ymin"], ev, log)
+                paras = block_paragraphs(doc[p], cfg["header_ymax"], cfg["footer_ymin"], ev, log, cfg.get("space_repair"))
                 pages.append((p + 1, paras))
         first = next((i for i, (_, paras) in enumerate(pages) if paras), None)
         if first is not None:
             no, paras = pages[first]
-            pages[first] = (no, strip_chapter_heading(paras, ch["title"], ch.get("num"), log, no))
+            pages[first] = (no, strip_chapter_heading(paras, ch["title"], ch.get("num"), log, no, ch.get("title_alt")))
         return join_pages(pages, ev, log)
 
     return extractor
@@ -464,9 +720,10 @@ def make_extractor(cfg, log=None):
 
 def validate_config(cfg):
     errors = []
-    src = cfg.get("slug") or cfg.get("pdf")
+    src = cfg.get("slug") or cfg.get("pdf") or cfg.get("epub")
     if not cfg.get("slug"):
-        errors.append("source %r has no slug" % cfg.get("pdf"))
+        errors.append("source %r has no slug" % (cfg.get("pdf") or cfg.get("epub")))
+    epub = bool(cfg.get("epub"))
     seen = set()
     for ch in cfg["chapters"]:
         uid = ch.get("unit_id")
@@ -477,7 +734,10 @@ def validate_config(cfg):
         seen.add(uid)
         if not ch.get("slug"):
             errors.append("%s: chapter %r has no filename slug" % (src, uid))
-        if ch["end"] < ch["start"]:
+        if epub:
+            if not ch.get("file"):
+                errors.append("%s: chapter %r has no EPUB file" % (src, uid))
+        elif ch["end"] < ch["start"]:
             errors.append("%s: chapter %r ends before it starts" % (src, uid))
     return errors
 
@@ -507,7 +767,11 @@ def build_markdown(src_title, part, chapters, extractor, slug, pdf=""):
         body = "\n\n".join(paras) + "\n"
         wc = words_in_text(body)
         total_out += wc
-        pages = "%d-%d" % (ch["start"], ch["end"])
+        if "start" in ch:
+            pages = "%d-%d" % (ch["start"], ch["end"])
+        else:
+            marks = [int(n) for n in re.findall(r"<!-- page (\d+) -->", body)]
+            pages = "%d-%d" % (min(marks), max(marks)) if marks else ""
         fname = "%02d-%s.md" % (idx, ch["slug"])
         label = ch.get("num")
         fields = [
@@ -533,6 +797,20 @@ def build_markdown(src_title, part, chapters, extractor, slug, pdf=""):
 if __name__ == "__main__":
     ran = False
     for cfg in SOURCES_CONFIG:
+        if cfg.get("epub"):
+            if not cfg["chapters"]:
+                continue
+            problems = validate_config(cfg)
+            if problems:
+                raise SystemExit("SOURCES_CONFIG errors:\n  " + "\n  ".join(problems))
+            ran = True
+            print("raw text -> %s" % save_epub_raw(cfg))
+            log = RepairLog()
+            build_markdown(cfg["title"], cfg["part"], cfg["chapters"], make_epub_extractor(cfg, log), cfg["slug"], cfg["epub"])
+            log_path = os.path.join(RAW, cfg["slug"], "repairs.tsv")
+            log.write(log_path)
+            print("repair log: %d entries -> %s" % (len(log.rows), log_path))
+            continue
         if not cfg["pdf"] or not cfg["chapters"]:
             continue
         problems = validate_config(cfg)
