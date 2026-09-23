@@ -35,7 +35,7 @@ QUOTE = re.compile(r'"([^"]*)"|“([^”]*)”')
 NUMBER = re.compile(r"\d(?:[\d,.]*\d)?")
 HEADING = re.compile(r"^#{2,3} .*$", re.M)
 
-# Markers whose loss changes meaning (preservation rule (a)-(c) in plan.md).
+# Markers whose loss changes meaning (preservation rule (a)-(c) in writing-rules.md).
 # Extend per project with source-specific hedges or attribution phrases.
 PROTECTED = [
     "perhaps", "probably", "possibly", "seemingly", "apparently", "tended to",

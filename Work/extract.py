@@ -83,7 +83,7 @@ SOURCES_CONFIG = [
             # slug: used in the filename. num: printed chapter label, or None if none.
             # start/end: one-based inclusive PDF pages.
             # Optional title_alt: extra heading spellings to strip, such as a
-            # heading with an OCR error ("The Silent Sprinq").
+            # heading with an OCR error ("The Quiet Harhour").
             {"unit_id": "", "slug": "", "title": "", "start": 1, "end": 1, "num": None, "printed_pages": ""},
         ],
     },

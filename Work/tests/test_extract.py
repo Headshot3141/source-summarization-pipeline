@@ -102,8 +102,8 @@ class JoinPages(unittest.TestCase):
     def test_capitalized_continuation_is_joined_and_flagged(self):
         log = RepairLog()
         a = "Delegates from every member state travelled to the conference held at"
-        paras = plain_pages([(1, [a]), (2, ["Versailles in the summer of 1919."])], log=log)
-        self.assertEqual(paras, [a + " Versailles in the summer of 1919."])
+        paras = plain_pages([(1, [a]), (2, ["Northbridge in the summer of 1919."])], log=log)
+        self.assertEqual(paras, [a + " Northbridge in the summer of 1919."])
         self.assertEqual(log.kinds(), ["page-join-uncertain"])
 
     def test_sentence_end_does_not_join(self):
@@ -334,8 +334,8 @@ class SpaceRepair(unittest.TestCase):
 
 class AltTitle(unittest.TestCase):
     def test_alternate_heading_spelling_is_stripped(self):
-        paras = ["2", "The Silent Sprinq", "Body text."]
-        out = strip_chapter_heading(paras, "The Silent Spring", 2, alt=["The Silent Sprinq"])
+        paras = ["2", "The Quiet Harhour", "Body text."]
+        out = strip_chapter_heading(paras, "The Quiet Harbour", 2, alt=["The Quiet Harhour"])
         self.assertEqual(out, ["Body text."])
 
 
