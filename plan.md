@@ -19,6 +19,14 @@ Set the summary body at about 40% of the retained substantive source word count.
 
 Report what each source argues. Do not endorse, refute, fact-check, or add outside context, and attribute claims to the author instead of stating them as fact. Keep the author's own position separate from quotations, allegations, objections, and views the author describes or rejects. Reproduce each source as printed, errors included: a summary that silently corrects its source is wrong.
 
+## Agents
+
+The default setup uses **Claude Opus 5.5 for every agent role**: summarizer, reviewer, merge and transition reviewer, whole-document reviewer, verifier, and later-pass agents. The coordinator is a Claude Code session (desktop app) that dispatches each agent as a subagent with the Agent tool (`model: "opus"`). It can therefore watch every agent directly: it receives each agent's completion report, can message a running agent, and reads the plan's usage windows itself. The coordinator still checks every output file and review record before it changes a status.
+
+Opus 5.5 in Claude Code does not silently truncate long outputs. A probe on 2026-09-26 had an Opus 5.5 subagent write 8,669 words (160 paragraphs) in a single Write call. The file was complete, with its end sentinel present, and no call was cut off or returned an error. That is several times the longest output this pipeline asks of any agent, so the output-cap probe in Step 1 is not needed with this setup. Run it again only for a different harness (such as opencode) or model.
+
+With the same model in every role, fresh context is what makes a reviewer or verifier independent: no agent reviews a file it wrote. See Step 10 for the verification decision.
+
 ## Lessons from earlier runs
 
 These shaped the rest of this plan. Read them before the pilot.
@@ -26,7 +34,7 @@ These shaped the rest of this plan. Read them before the pilot.
 - **Word budgets say nothing about fidelity.** In one full run, every chapter was accepted inside its budget, and an independent check with a stronger model then found material errors in most sampled chapters. All of them made the summary more assertive than its source: dropped contrast reversals, hardened hedges, attribution drift, pronouns resolved to the wrong actor, orphaned evidence, and computed totals. The reviewer had seen many of these and accepted them as omissions. The fix was an enumerable preservation rule with an audit, which now lives in `writing-rules.md` and the reviewer prompt from the start, and an independent verification pass (Step 10).
 - **Agents fact-check from memory.** Whole-document reviewers and style-pass agents "corrected" dates and names that the summaries reproduced faithfully from their sources. Every brief forbids outside knowledge, and the coordinator checks any reported error against the chapter source before acting.
 - **Every pass leaves reports behind.** Passes that may not fix what they notice log it, and the next pass resolves the log. Plan for a report-then-act sequence after the main run (Step 11), and decide with the user where to stop.
-- **The harness can truncate silently.** An agent harness capped per-request output below the model's limit, and agents ended at the cap with no output and no error. Probe the effective cap before dispatch (Step 1).
+- **The harness can truncate silently.** An agent harness (opencode) capped per-request output below the model's limit, and agents ended at the cap with no output and no error. Opus 5.5 subagents in Claude Code, the default setup (see Agents), were probed and do not do this. Probe the effective cap before dispatch only when using another harness or model (Step 1).
 - **Usage windows, not chapter counts, set batch size.** Measure cost per task in the pilot and size rounds to fit.
 - **Per-chapter ranges do not bound the total.** Chapters clustered near the top of their ranges, and the overall ratio ran well above the target. Track the aggregate.
 
@@ -156,8 +164,8 @@ Repeat the table for each source, then give the grand total and overall ratio.
 - Confirm the dependencies for extraction, OCR if needed, Markdown, templating, and PDF rendering. Install `requirements.txt` and record versions, executable paths, and any installations required, including Microsoft Edge for PDF rendering, in the Preflight section of `Work/checks.md`.
 - The template ships the `stop-slop` skill at `stop-slop-main/SKILL.md` and the shared writing rules at `writing-rules.md`. Confirm both are present, and pass `writing-rules.md` as the shared instructions for every agent. If the skill is missing, use the writing rules alone and note the fallback. The writing rules list where they override stop-slop.
 - **Agent limits.** Record each role's model, context window, and effective per-request output cap, and the file-size limits for agent inputs: a 29KB body-text target and a 32KB hard cap per assigned chapter or part source file (1KB = 1,000 bytes). Larger source files caused agent timeouts even when they fit the context window. For each task, estimate the full input and required output: instructions, source, any summary under review, and a safety margin.
-- **Probe the output cap.** A harness can impose its own cap below the model's limit, and reasoning tokens usually share it. An agent that hits the cap ends with finish reason `length`, often with no output and no error. Run a throwaway probe task, confirm from the harness's logs or message store that no step finished at `length` and that totals exceed the old cap, and record the result. Example: opencode 1.18 caps output at 32,000 tokens unless `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX` is set before it starts; `start-opencode.bat` sets it. Do not dispatch summarizers or reviewers until the probe passes.
-- **Usage.** If the account has a usage window, record how the user reads it and the level at which they stop (for example 90%). Measure cost per task in the pilot.
+- **Probe the output cap (other harnesses only).** Skip this with the default setup: Opus 5.5 subagents in Claude Code were probed and do not truncate (see Agents). Record the skip and cite that probe in `Work/checks.md`. For any other harness or model: a harness can impose its own cap below the model's limit, and reasoning tokens usually share it. An agent that hits the cap ends with finish reason `length`, often with no output and no error. Run a throwaway probe task, confirm from the harness's logs or message store that no step finished at `length` and that totals exceed the old cap, and record the result. Example: opencode 1.18 caps output at 32,000 tokens unless `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX` is set before it starts; `start-opencode.bat` sets it. Do not dispatch summarizers or reviewers until the probe passes.
+- **Usage.** If the account has a usage window, record how it is read and the level at which the user stops. The default stopping level is 95% of the 5-hour window; with Opus 5.5 subagents it takes a lot of work to fill the window, so the margin can be small. Use a different level if the user sets one. In the Claude Code desktop app the coordinator can read the plan's 5-hour and weekly windows itself (the session-management usage tool), so it can check before each batch without asking. Measure cost per task in the pilot.
 - **Word count command.** Test `python Work/count_words.py <file>` from the project root, then use that tested invocation as `{WORD_COUNT_COMMAND}` in prompts, including the executable path if `python` is not on PATH.
 - Pick a pilot chapter complex enough to exercise extraction, splitting, and review: a chapter that will be split into parts is best.
 
@@ -237,7 +245,7 @@ If a run stalls or is interrupted, archive the affected outputs before rerunning
 
 ### 6. Chapter Review
 
-Assign one fresh-context agent per part or chapter with the Reviewer prompt in `prompts.md`. It reads the source and the original draft, writes the reviewed summary to `Work/Summaries/`, and saves a review record in the fixed format the prompt gives, including the contrast audit and number audit required by the preservation rule. In later rounds it starts from the latest reviewed summary instead of the original draft. Fresh context helps reviewers catch errors, but they can still miss errors or introduce new ones. Use the strongest model you can afford for review; a cheaper model can draft.
+Assign one fresh-context agent per part or chapter with the Reviewer prompt in `prompts.md`. It reads the source and the original draft, writes the reviewed summary to `Work/Summaries/`, and saves a review record in the fixed format the prompt gives, including the contrast audit and number audit required by the preservation rule. In later rounds it starts from the latest reviewed summary instead of the original draft. Fresh context helps reviewers catch errors, but they can still miss errors or introduce new ones. The default setup uses Opus 5.5 for review as for drafting (see Agents). If you use another setup, use the strongest model you can afford for review; a cheaper model can draft.
 
 Build the queue with `Work/make_review_queue.py` and work through it in batches. After each batch:
 
@@ -296,7 +304,7 @@ Optionally build `Summary.epub` with `python Work/build_epub.py` (requires `eboo
 
 ### 10. Independent Verification
 
-Once all chapters are accepted, run the verification pass in `passes/verification-pass.md`: a report-only check of a sample of chapters by a stronger model than the one that drafted them, triage, a scope decision with the user, and remediation rounds under the preservation rule. Copy the brief to the project root and keep its status tables there. Skip it only if the strongest available model drafted and reviewed every chapter under the current prompts and the user agrees; record the decision.
+Once all chapters are accepted, run the verification pass in `passes/verification-pass.md`: a report-only check of a sample of chapters by a stronger model than the one that drafted them, triage, a scope decision with the user, and remediation rounds under the preservation rule. Copy the brief to the project root and keep its status tables there. Skip it only if the strongest available model drafted and reviewed every chapter under the current prompts and the user agrees; record the decision. Under the default setup (Opus 5.5 in every role) that condition is met, so whether to run the pass is the user's call. If it runs, the verifiers are fresh-context Opus 5.5 agents that never saw the chapters they check.
 
 After remediation, update the Final words and deviation columns in the budget tables, reassemble, rebuild the PDF, and record the pass in `Work/checks.md`.
 
@@ -318,7 +326,7 @@ Passes used in earlier runs, in order:
 ## Operations
 
 - **Handoff.** Keep a Project Status section at the end of this plan current: what is complete, the next pending units, decisions and gotchas, and the commands in use. A new session should be able to resume from it and `Work/checks.md` alone. Each pass brief keeps its own cold-start handoff.
-- **Usage.** Where the account has a usage window, ask the user for the current reading before each batch in a costly pass, never start a batch that could cross their stopping point, and log readings in the pass brief.
+- **Usage.** Where the account has a usage window, check the current reading before each batch in a costly pass (read it yourself in Claude Code, or ask the user), never start a batch that could cross their stopping point, and log readings in the pass brief.
 - **Commits.** Commit after each batch with the pass name and progress count ("{pass}: {source} ch-03 to ch-08 (24 of 90)"), and after each rebuild.
 - **Parallel agents.** Tell agents that others are editing other files in parallel and to ignore those changes in git status.
 - **Settled decisions.** When the user settles a recurring question (spelling variants, `%` against "percent", quote style), record it in the relevant brief so agents stop raising it.
@@ -344,7 +352,7 @@ Passes used in earlier runs, in order:
 ## Status
 
 - [ ] Sources, scope, dependencies, and style instructions recorded
-- [ ] Agent output cap probed and usage limits recorded
+- [ ] Agent models recorded (default: Opus 5.5 in every role); output cap probed, or skip recorded under the default setup; usage limits recorded
 - [ ] Page mappings and chapter segmentation confirmed
 - [ ] Raw extraction preserved, uncertain repairs reviewed, and cleaned output validated
 - [ ] Word budgets and context-size checks completed

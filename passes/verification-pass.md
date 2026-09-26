@@ -160,7 +160,7 @@ Source ambiguities and anything needing the original document. Do not reconstruc
 
 ## Pacing
 
-Round sizes follow the usage window, not the chapter count. In one run, a 23-chapter first round exhausted the window and ran into paid credits; 11-chapter rounds, dispatched as batches of 6 and 5, then fit. Measure the cost of the first batch, then size rounds to end at about 90% of the window. Record readings in the usage log.
+Round sizes follow the usage window, not the chapter count. In one run, a 23-chapter first round exhausted the window and ran into paid credits; 11-chapter rounds, dispatched as batches of 6 and 5, then fit. Measure the cost of the first batch, then size rounds to end at the project's stopping level (default 95% of the window; see plan.md, Step 1, Usage). Record readings in the usage log.
 
 ## Status
 

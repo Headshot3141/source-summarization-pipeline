@@ -107,7 +107,7 @@ The agent reads the brief only through this section, so the status tables below 
 
 ## Pacing
 
-Cost is roughly per chapter, not per kilobyte: each agent reads the brief and writing rules as a fixed cost, and edits are targeted. In one run each agent used 65-78K tokens whether its chapter was 21KB or 54KB, about 3% of a usage window. Measure your own cost in the pilot, then size sessions to stop at about 90% of the window. Large chapters needed no special handling.
+Cost is roughly per chapter, not per kilobyte: each agent reads the brief and writing rules as a fixed cost, and edits are targeted. In one run each agent used 65-78K tokens whether its chapter was 21KB or 54KB, about 3% of a usage window. Measure your own cost in the pilot, then size sessions to stop at the project's stopping level (default 95% of the window; see plan.md, Step 1, Usage). Large chapters needed no special handling.
 
 ## Cold-start handoff
 
