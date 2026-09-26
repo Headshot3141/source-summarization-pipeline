@@ -35,6 +35,13 @@ the claim for, you keep. Never total, average, or round figures. If you cut
 a claim, cut its evidence; if you keep evidence, keep its claim. Preservation
 is a sufficient reason to exceed the range; padding never is.
 
+Paragraphs in SOURCE that start with "> " are block quotations: other
+people's words, not the author's. Follow the block-quotation rule in the
+shared instructions: reproduce a block quotation whole and exactly, as a
+"> " block quotation introduced by a sentence naming the speaker and
+without its citation, or leave it out entirely. Never paraphrase,
+condense, or partially quote one.
+
 Cover the main arguments, supporting specifics, and conclusions. Leave out
 trivia and repetition. Choose what to cut by importance to the argument, not
 by position in the chapter. Flag source ambiguities instead of filling gaps.
@@ -79,7 +86,10 @@ own knowledge of the subject.
 2. Preservation: apply the binding preservation rule in the shared
    instructions. A lost contrast reversal, hardened hedge, migrated
    attribution, computed figure, or orphaned piece of evidence is a
-   material error to fix, never an acceptable omission.
+   material error to fix, never an acceptable omission. Apply the
+   block-quotation rule too: each "> " quotation in SOURCE appears in the
+   summary whole and exact, or not at all. Paraphrase, condensation, or a
+   partial quotation of one is a material error.
 3. Coverage: work from source to summary. Restore missing main arguments,
    consequential qualifications, and necessary supporting evidence.
 4. Style and length: make minimal edits. Fidelity comes before style
@@ -90,7 +100,9 @@ own knowledge of the subject.
 Reproduce the source as printed. A summary that silently corrects a source
 error is wrong; restore the source's version. Keep passive voice or adverbs
 where accuracy needs them. Keep the ## heading. No em dashes or citations in
-the final prose. Use a list only where the source passage is itself a list.
+the final prose. A block quotation keeps its printed punctuation, em dashes
+included, and loses only its citation. Use a list only where the source
+passage is itself a list.
 
 Write the review record in this format, after running WORD COUNT COMMAND on
 WRITE following your final edit:
@@ -109,6 +121,8 @@ WRITE following your final edit:
   page marker it comes from. Flag any the source does not state in that form.
   ## Self-certification
   (b) modality, (c) attribution, (e) claim-evidence pairing: one line each.
+  Block quotations: each one in the summary checked word for word against
+  SOURCE; none paraphrased or partially quoted. One line.
   ## Omissions kept
   Material deliberately left out, and why leaving it out misleads no reader.
   ## Unresolved

@@ -229,6 +229,12 @@ class StylePassCheck(unittest.TestCase):
         changed = check_style_pass.check(old, "## T\n\nIn 1931, output was 13 and costs 40.\n")
         self.assertIn("NUMBER REMOVED: 12", changed)
 
+    def test_block_quote_edit_is_flagged(self):
+        old = "## T\n\nShe writes:\n\n> We watch the harbor closely. And I know the boats.\n"
+        new = "## T\n\nShe writes:\n\n> We watch the harbor closely and I know the boats.\n"
+        self.assertTrue(any("BLOCK QUOTE CHANGED" in p for p in check_style_pass.check(old, new)))
+        self.assertEqual(check_style_pass.check(old, old.replace("She writes", "She wrote")), [])
+
     def test_quote_edit_heading_and_paragraph_changes_are_flagged(self):
         new = '## Title 2\n\nThe author says growth was "slow."\n\nIt perhaps fell 12% in 1931, but recovered.\n'
         problems = " | ".join(check_style_pass.check(self.OLD, new))

@@ -7,6 +7,7 @@ change wording but never meaning, so this checks only what it must not change:
   numbers  every numeric token identical; a reorder of the same numbers is
            reported separately as a softer "NUMBER ORDER" flag
   headings ## / ### heading text identical
+  blocks   block-quotation lines ("> ") identical
   paras    paragraph count unchanged
   markers  counts of protected hedge, contrast and attribution markers not
            reduced (whole-word matches)
@@ -34,6 +35,8 @@ QUOTE = re.compile(r'"([^"]*)"|“([^”]*)”')
 # A number ends in a digit, so a comma or period after it is not absorbed.
 NUMBER = re.compile(r"\d(?:[\d,.]*\d)?")
 HEADING = re.compile(r"^#{2,3} .*$", re.M)
+# A block quotation reproduces the source exactly, so a style pass never touches it.
+BLOCK_QUOTE = re.compile(r"^>.*$", re.M)
 
 # Markers whose loss changes meaning (preservation rule (a)-(c) in writing-rules.md).
 # Extend per project with source-specific hedges or attribution phrases.
@@ -87,6 +90,10 @@ def check(old, new):
                 problems.append("NUMBER REMOVED: %s" % ", ".join(sorted(lost.elements())))
             if added:
                 problems.append("NUMBER ADDED: %s" % ", ".join(sorted(added.elements())))
+
+    ob, nb = BLOCK_QUOTE.findall(old), BLOCK_QUOTE.findall(new)
+    if ob != nb:
+        problems.append("BLOCK QUOTE CHANGED: %d block-quote lines before, %d after; they must match exactly" % (len(ob), len(nb)))
 
     oh, nh = HEADING.findall(old), HEADING.findall(new)
     if oh != nh:

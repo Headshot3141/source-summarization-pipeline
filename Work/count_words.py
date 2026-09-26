@@ -12,14 +12,16 @@ def words_in_text(text):
     number or date counts as one token. HTML comments (page markers such
     as ``<!-- page 12 -->`` and pipeline markers) are removed first,
     wherever they sit, so a marker inside a word or sentence changes
-    nothing. Then lines starting with ``#`` (headings) are excluded. YAML
-    frontmatter is not stripped, so pass body text only.
+    nothing. Then lines starting with ``#`` (headings) are excluded, and
+    the Markdown block-quote marker (``>`` at the start of a line) is
+    removed, so a block quotation counts its words only. YAML frontmatter
+    is not stripped, so pass body text only.
     """
     kept = []
     for line in re.sub(r"<!--.*?-->", "", text, flags=re.S).splitlines():
         if line.startswith("#"):
             continue
-        kept.append(line)
+        kept.append(re.sub(r"^\s*(?:>\s?)+", "", line))
     return len(re.findall(r"\S+", "\n".join(kept)))
 
 

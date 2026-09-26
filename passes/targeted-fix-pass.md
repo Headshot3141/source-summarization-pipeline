@@ -16,7 +16,7 @@ Reported items usually fall into these groups. Name the groups this pass covers:
 - **Dropped qualifier.** A hedge, counterfactual, estimate marker, scope word ("some", "most", "only", "further"), or intensity marker ("even") the source has and the summary lost. "Some members" and "members" are different claims.
 - **Lost precision.** A date or figure narrowed or blurred ("1924" for "December 1924").
 - **Altered claim.** An added causal "so", an aim turned into an outcome, a misplaced "Yet", a stronger or weaker verb, a changed actor.
-- **Attribution and quotation.** A source quotation printed without quotation marks, a quotation whose wording differs from the source, or the author's voice assigned to someone else.
+- **Attribution and quotation.** A source quotation printed without quotation marks, a quotation whose wording differs from the source, a block quotation (`> ` in the source) paraphrased, condensed, or partially quoted instead of reproduced whole or dropped, or the author's voice assigned to someone else.
 - **Possible divergence or inversion.** A name, date, figure, or sequence that may not match the source.
 - **Omitted content.** A clause or sentence the summary left out.
 - **Spelling.** A name spelled differently from the source.
@@ -27,7 +27,7 @@ Reported items usually fall into these groups. Name the groups this pass covers:
 When the list is long, rank it and agree with the user which tiers to act on:
 
 - **Tier 1: the summary states something the source does not.** A figure not in the source, the author's argument assigned to opponents, the wrong actor or evidence, a causal link the source lacks, a hedged thesis stated as certain, or a claim widened beyond the source's scope.
-- **Tier 2: a lost contrast, hedge, scope word, or attribution marker** that changes a claim's strength, or a source quotation printed without quotation marks.
+- **Tier 2: a lost contrast, hedge, scope word, or attribution marker** that changes a claim's strength, a source quotation printed without quotation marks, or a block quotation paraphrased or partially quoted.
 - **Tier 3: minor intensity and precision items.**
 
 List items in source and chapter order so one agent handles all of a chapter's items together; work Tier 1 first where a batch cannot hold everything.

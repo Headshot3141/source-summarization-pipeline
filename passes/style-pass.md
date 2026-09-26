@@ -17,7 +17,7 @@ A sentence that is plain but clear is finished. Leave it alone. Churn is a cost,
 ## Hard constraints
 
 1. **Meaning does not change.** Not the claim, not its strength, not who is said to hold it, not what it is contingent on. If you cannot rephrase a sentence without shifting its meaning even slightly, leave it as it is.
-2. **Quoted material is untouchable**, byte for byte, including its punctuation and any em dashes. Edit around a quotation; do not move its boundaries.
+2. **Quoted material is untouchable**, byte for byte, including its punctuation and any em dashes. That includes block quotations (lines starting `> `). Edit around a quotation; do not move its boundaries.
 3. **The preservation rule in `writing-rules.md` outranks style.** You may rephrase a contrast connective but not drop or weaken the reversal, or move it to a different scope. Hedges, estimate markers, and scope words are meaning, never unnecessary adverbs. Attribution may not move into the narrative voice. Do not combine, total, average, convert, or round any figure. Keep claims with their evidence.
 4. **Add nothing and remove no information.** Cutting filler words is in scope; cutting a clause that carries information is not.
 5. **Word count is not a constraint.** Clearer and longer beats shorter and murky. Do not count words, trim to fit, or pad. `check_words.py` is not run on this pass.
@@ -62,7 +62,8 @@ is plain but clear is finished.
 Absolute constraints, from BRIEF:
 - Meaning does not change: not the claim, its strength, whose view it is,
   or what it is contingent on.
-- Text inside quotation marks is untouchable, including its punctuation.
+- Text inside quotation marks, and every line starting "> " (a block
+  quotation), is untouchable, including its punctuation.
 - Hedges, contrast reversals, scope words, attribution markers, and
   numbers are meaning, not style. They survive every edit.
 - Add nothing and remove no information.
@@ -107,7 +108,7 @@ The agent reads the brief only through this section, so the status tables below 
 
 ## Pacing
 
-Cost is roughly per chapter, not per kilobyte: each agent reads the brief and writing rules as a fixed cost, and edits are targeted. In one run each agent used 65-78K tokens whether its chapter was 21KB or 54KB, about 3% of a usage window. Measure your own cost in the pilot, then size sessions to stop at the project's stopping level (default 95% of the window; see plan.md, Step 1, Usage). Large chapters needed no special handling.
+Cost is roughly per chapter, not per kilobyte: each agent reads the brief and writing rules as a fixed cost, and edits are targeted. In one run each agent used 65-78K tokens whether its chapter was 21KB or 54KB, about 3% of a usage window. Measure your own cost in the pilot, then size sessions to stop at about 90% of the window. Large chapters needed no special handling.
 
 ## Cold-start handoff
 

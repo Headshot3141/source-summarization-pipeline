@@ -55,6 +55,11 @@ h3 {
 p { margin: 0 0 0.65em; text-align: justify; }
 em { font-style: italic; }
 strong { font-weight: bold; }
+blockquote {
+  margin: 0 2em 0.65em;
+  font-size: 10.5pt;
+}
+blockquote p { text-align: left; }
 </style>
 </head>
 <body>

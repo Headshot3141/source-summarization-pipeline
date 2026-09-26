@@ -54,6 +54,19 @@ class Markers(unittest.TestCase):
     def test_inline_marker_is_not_counted(self):
         self.assertEqual(words_in_text("the popu<!-- page 5 -->lation was <!-- page 6 --> large"), 4)
 
+    def test_block_quote_marker_is_not_counted(self):
+        self.assertEqual(words_in_text("> I used to feel\n\n<!-- page 5 -->\n> that way.\n\nProse."), 7)
+
+    def test_part_boundary_never_falls_inside_a_block_quotation(self):
+        para = "Word " * 700 + "end.\n\n"  # about 3.5KB per paragraph
+        # Eight 1.5KB verse paragraphs, so the 29KB target falls inside the verse.
+        verse = "".join("> Verse line %d " % i + "word " * 300 + "end.\n\n" for i in range(8))
+        body = para * 5 + "She sings:\n\n" + verse + para * 4
+        parts, _ = split_parts.make_parts(body, 30_000)
+        self.assertGreater(len(parts), 1)
+        for a, _ in parts[1:]:
+            self.assertFalse(body[a:].startswith(">"), "part starts inside a block quotation: %r" % body[a:a + 20])
+
 
 class PartContext(unittest.TestCase):
     body = "Alpha defines a term.\n\nBeta uses it.\n\nGamma concludes.\n"

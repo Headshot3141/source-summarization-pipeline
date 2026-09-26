@@ -1,6 +1,8 @@
 import os
 import re
+import sys
 import zipfile
+from collections import Counter
 from html.parser import HTMLParser
 
 import pymupdf
@@ -61,6 +63,21 @@ HYPHENATION_MIN_SHARE = 0.5
 # A block starting with a list or note marker never continues the previous page.
 LIST_MARKER = re.compile(r"^(\(?(\d{1,3}|[A-Za-z]|[ivxlcdm]{1,5})[.)]|[\u2022\u25aa\u25e6\u25cf\u25a0*]|\d{1,3}(?= +[A-Z\u201c\u2018\"']))\s")
 
+# Block quotations are marked with a Markdown "> " prefix on each paragraph,
+# so agents can tell quoted text from the author's own prose. A block
+# quotation's citation follows its closing punctuation ("worthwhile. (Marlow
+# 1986, 82)"); an in-text quotation's comes before the period.
+BLOCK_QUOTE_PREFIX = "> "
+BLOCK_CITATION = re.compile(r"[.?!…”’\]]\s*\([^()]*\d[^()]*\)$")
+# An epigraph ends with its attribution after a dash: "... and the river
+# kept its own counsel. —Ada Penhale 1937, 16".
+EPIGRAPH = re.compile(r"[.?!…”’]\s+—\s?[A-Z][^—?!]{1,80}$")
+# Verse ends with its citation standing alone: "(Penhale 1982, 133)".
+CITATION_ONLY = re.compile(r"^\([^()]*\d[^()]*\)$")
+# How many paragraphs after a lead-in are searched for the citation that
+# ends a quotation (verse is often one paragraph per line).
+BLOCK_QUOTE_WINDOW = 8
+
 SOURCES_CONFIG = [
     {
         # PDF source.
@@ -104,6 +121,38 @@ SOURCES_CONFIG = [
     #         {"unit_id": "ch-01", "slug": "", "title": "", "num": 1, "file": "OEBPS/ch01.xhtml", "printed_pages": ""},
     #     ],
     # },
+    # Paged .txt source: a pdftotext dump with a form feed per PDF page (piece
+    # k = PDF page k). Use when only a text dump exists. Lines are cleaned per
+    # page: running heads (header_patterns, footer_patterns), drop caps, and
+    # junk lines are dropped; line_fixes replaces whole lines the dump mangled
+    # (letter-spaced or two-line headings: "\nHeading\n" makes a block).
+    # Set "dehyphenated": True if the dump joined hyphen-ended lines and
+    # dropped the hyphen ("workingclass"); hyphen_fixes lists hand-checked
+    # repairs. "kerning_spaces": True restores spaces lost after punctuation
+    # before T, V, W, Y. "notes" attaches endnotes printed at the back to each
+    # chapter (pages, and a heading pattern whose group is the chapter key).
+    # "block_quotes": True marks block quotations with "> " (see
+    # mark_block_quotes); block_quote_fixes holds hand-checked corrections,
+    # and not_headings lists first lines the heading rule must skip.
+    # Chapters give start/end PDF pages and a first_line (stop_line) prefix.
+    # {
+    #     "slug": "",
+    #     "txt": "",
+    #     "title": "",
+    #     "part": 3,
+    #     "header_patterns": [r"^[A-Z][A-Z'.,:&\- ]*$"],
+    #     "dehyphenated": False,
+    #     "kerning_spaces": False,
+    #     "line_fixes": {},
+    #     "notes": {"start": 300, "end": 310, "heading": r"^Chapter (\d+)$"},
+    #     "block_quotes": True,
+    #     "block_quote_fixes": {"join": [], "start": [], "end": [], "add": [], "remove": []},
+    #     "not_headings": [],
+    #     "chapters": [
+    #         {"unit_id": "ch-01", "slug": "", "title": "", "num": 1, "start": 18, "end": 37,
+    #          "printed_pages": "1-20", "first_line": "", "notes": 1},
+    #     ],
+    # },
 ]
 
 
@@ -130,6 +179,10 @@ class RepairLog:
       page-break-unjoined                 page ends without closing punctuation but was not joined
       furniture-dropped                   bare page number or date stamp in a margin zone
       url-join-uncertain                  URL line ends in a dot before a lowercase word; space kept
+      blockquote                          block quotation marked: colon lead-in and closing citation
+      blockquote-nocite, -multi,          block quotation marked on weaker evidence; review each
+      blockquote-no-leadin, -epigraph
+      blockquote-fixed                    marked or unmarked by the source's block_quote_fixes
     """
 
     COLUMNS = ("unit_id", "pdf_page", "kind", "detail")
@@ -595,6 +648,531 @@ def save_epub_raw(cfg):
     return path
 
 
+# ---------------------------------------------------------------- paged text
+#
+# A plain-text dump of a PDF (pdftotext without -layout) with one form feed
+# (U+000C) after each page, so piece k of the split is PDF page k. Lines are
+# the PDF's lines; blank lines separate text blocks. Running heads, page
+# numbers, and drop caps are still in the text and are removed per source.
+
+PAGE_NUM_LINE = re.compile(r"^(?:\d{1,4}|[ivxlcdm]{1,7})$", re.I)
+# A drop cap set on its own line: "I" / "n 1831 Edith Varga" -> "In 1831".
+DROP_CAP = re.compile(r"^[A-Z]$")
+DROP_CAP_REST = re.compile(r"^[a-z.’']")
+
+
+def txt_page_texts(path):
+    """Return the page texts of a paged .txt source, PDF page k at index k-1.
+
+    The text after the last form feed is kept only if it has content.
+    """
+    with open(path, encoding="utf-8") as f:
+        pages = f.read().split("\f")
+    if pages and not pages[-1].strip():
+        pages.pop()
+    return pages
+
+
+def clean_txt_line(line, cfg):
+    """Normalize one line: ligatures, per-source character map, stray controls."""
+    line = line.translate(LIGATURE_TABLE)
+    for a, b in cfg.get("char_map", {}).items():
+        line = line.replace(a, b)
+    return re.sub(r"[\x00-\x08\x0b\x0e-\x1f]", "", line).rstrip()
+
+
+def _matches(line, patterns):
+    return any(p.search(line) for p in patterns)
+
+
+def strip_txt_furniture(lines, cfg, log=None, page=None):
+    """Drop running heads, page numbers, and junk lines from one page.
+
+    Header lines are dropped from the top of the page while they match the
+    source's header patterns (or are a bare page number), within the first
+    header_scan non-blank lines; footer lines the same way from the bottom.
+    JUNK_LINES and the source's junk_lines are dropped anywhere. Each dropped
+    line is logged, so a heading taken for furniture can be found.
+    """
+    head = [re.compile(p) for p in cfg.get("header_patterns", [])] + [PAGE_NUM_LINE]
+    foot = [re.compile(p) for p in cfg.get("footer_patterns", [])] + [PAGE_NUM_LINE]
+    junk = JUNK_LINES | {norm(j) for j in cfg.get("junk_lines", [])}
+    scan = cfg.get("header_scan", 8)
+    lines = list(lines)
+
+    def trim(indices, patterns):
+        seen = 0
+        for i in indices:
+            s = lines[i].strip()
+            if not s:
+                continue
+            seen += 1
+            if seen > scan or not _matches(s, patterns):
+                return
+            _log(log, page, "furniture-dropped", s)
+            lines[i] = ""
+
+    trim(range(len(lines)), head)
+    trim(range(len(lines) - 1, -1, -1), foot)
+    out = []
+    for ln in lines:
+        s = ln.strip()
+        if s and (norm(s) in junk or any(p.match(s) for p in STAMP_PATTERNS)):
+            _log(log, page, "furniture-dropped", s)
+            continue
+        out.append(ln)
+    return out
+
+
+def join_drop_caps(lines, log=None, page=None):
+    """Join a drop cap on its own line to the text that follows it.
+
+    The cap joins the next line's first word ("I" / "n 1831" -> "In 1831",
+    "U" / ".S." -> "U.S.") when that makes a known word or the rest starts
+    with punctuation. Otherwise the cap is a word of its own ("I" /
+    "initially" -> "I initially"). An opening quotation mark set alone on
+    the line before the cap is joined too.
+    """
+    out = list(lines)
+    for i, ln in enumerate(out):
+        cap = ln.strip()
+        if not DROP_CAP.match(cap):
+            continue
+        j = next((k for k in range(i + 1, len(out)) if out[k].strip()), None)
+        if j is None or j - i > 2 or not DROP_CAP_REST.match(out[j].strip()):
+            continue
+        rest = out[j].strip()
+        first = re.match(r"[A-Za-z]*", rest).group(0)
+        joined = not first or is_known(cap + first)
+        sep = "" if joined else " "
+        p = next((k for k in range(i - 1, -1, -1) if out[k].strip()), None)
+        quote = ""
+        if p is not None and i - p <= 2 and out[p].strip() in ("“", "‘", '"', "'"):
+            quote = out[p].strip()
+            out[p] = ""
+        _log(log, page, "dropcap-joined" if joined else "dropcap-word", "%s%s + %s" % (quote, cap, rest[:20]))
+        out[j] = quote + cap + sep + rest
+        out[i] = ""
+    return out
+
+
+def txt_line_width(pages):
+    """Typical full line length in characters for a paged text source.
+
+    The median of ordinary lines: those over 20 characters and not overlong
+    (a dehyphenating dump joins a whole line onto the one before it).
+    """
+    lengths = sorted(len(ln.strip()) for p in pages for ln in p.splitlines() if len(ln.strip()) > 20)
+    if not lengths:
+        return 70
+    med = lengths[len(lengths) // 2]
+    ordinary = [n for n in lengths if n <= 1.3 * med]
+    return ordinary[len(ordinary) // 2]
+
+
+def restore_compound_hyphens(line, ev, width, log=None, page=None, fixes=None):
+    """Put back compound hyphens a dehyphenating dump removed.
+
+    Such a dump joins the next line onto a line ending in a hyphen and drops
+    the hyphen, so a real compound broken at a line end comes out as one
+    word ("workingclass"). A word the dictionary does not know gets its
+    hyphen back when the document spells it hyphenated by a clear majority,
+    or when the source config lists it (hyphen_fixes, checked by hand).
+    Joins usually make an overlong line; doubtful words on such lines are
+    left as printed and logged for review.
+    """
+    overlong = len(line) > 1.3 * width
+    fixes = fixes or {}
+    counts = getattr(ev, "counts", {})
+
+    def fix(m):
+        word = m.group(0)
+        if is_known(word) or "-" in word:
+            return word
+        fixed = fixes.get(word)
+        if fixed:
+            _log(log, page, "compound-hyphen-restored", "%s -> %s (config, checked by coordinator)" % (word, fixed))
+            return fixed
+        n_joined = counts.get(word.lower(), 0)
+        for i in range(2, len(word) - 1):
+            cand = word[:i] + "-" + word[i:]
+            n_hyph = counts.get(cand.lower(), 0)
+            if not n_hyph:
+                continue
+            # The dump also makes the joined form wherever it rejoined a
+            # break, so the joined count is inflated; the hyphenated form
+            # only comes from the author. A clear majority settles it.
+            if n_hyph >= 2 and n_hyph >= 3 * n_joined:
+                _log(log, page, "compound-hyphen-restored", "%s -> %s (document: %d hyphenated, %d joined)" % (word, cand, n_hyph, n_joined))
+                return cand
+            if n_joined >= 3 * n_hyph or not overlong:
+                return word
+            _log(log, page, "compound-hyphen-uncertain", "%s or %s: document has %d joined, %d hyphenated (kept as printed)" % (word, cand, n_joined, n_hyph))
+            return word
+        if n_joined > 1 or not overlong:
+            return word
+        halves = [(word[:i], word[i:]) for i in range(3, len(word) - 2)]
+        if any(is_known(a) and is_known(b) for a, b in halves):
+            _log(log, page, "compound-hyphen-uncertain", "%s: not elsewhere in the document (kept as printed)" % word)
+        return word
+
+    return re.sub(r"[A-Za-zÀ-ɏ]{5,}", fix, line)
+
+
+def txt_paragraphs(lines, cfg, ev, width, log=None, page=None, para_start=None):
+    """Split one page's cleaned lines into paragraphs.
+
+    Blank lines separate blocks. Inside a block a paragraph ends at a line
+    that ends a sentence and falls well short of the full line width (for an
+    overlong joined line, its last physical line is measured). The first line
+    of a block is its own paragraph when it is short and reads as a heading.
+    A short line ending in a colon ends a paragraph too: it introduces a
+    block quotation, which the dump does not set off. para_start, if given,
+    is a pattern for lines that always begin a paragraph (note numbers).
+    not_headings lists line prefixes the heading rule must skip (a chapter's
+    first line, shortened by a drop cap).
+
+    With the source's block_quotes setting, a colon line of any length ends
+    a paragraph when the next line starts with a capital or an opening
+    quotation mark, and a line ending in a block citation ends one too, so
+    a block quotation is a paragraph of its own (see mark_block_quotes).
+    """
+    bq = cfg.get("block_quotes", False)
+    blocks, cur = [], []
+    for ln in lines:
+        if ln.strip():
+            cur.append(ln.strip())
+        elif cur:
+            blocks.append(cur)
+            cur = []
+    if cur:
+        blocks.append(cur)
+    dehyph = cfg.get("dehyphenated", False)
+    paras = []
+    for block in blocks:
+        if dehyph:
+            fixes = cfg.get("hyphen_fixes", {})
+            block = [restore_compound_hyphens(ln, ev, width, log, page, fixes) for ln in block]
+        group = []
+        for i, ln in enumerate(block):
+            if para_start is not None and group and para_start.match(ln):
+                paras.append(join_lines(group, ev, log, page))
+                group = []
+            if (i == 0 and len(block) > 1 and len(ln) < 0.7 * width and is_heading(ln) and block[1][:1].isupper()
+                    and not any(ln.startswith(x) for x in cfg.get("not_headings", []))):
+                paras.append(ln)
+                continue
+            group.append(ln.replace("­", "-") if ln.endswith("­") else ln)
+            tail = len(ln) - width if len(ln) > 1.3 * width else len(ln)
+            nxt = block[i + 1] if i + 1 < len(block) else ""
+            if bq and (BLOCK_CITATION.search(ln) or (ln.endswith(":") and re.match(r"[A-Z“‘\"']", nxt))):
+                paras.append(join_lines(group, ev, log, page))
+                group = []
+            elif (ends_sentence(ln) or ln.endswith(":")) and tail < 0.8 * width:
+                paras.append(join_lines(group, ev, log, page))
+                group = []
+        if group:
+            paras.append(join_lines(group, ev, log, page))
+    return [p for p in paras if p]
+
+
+# Some typesetting tightens the gap after punctuation before T, V, W, and Y
+# (kerning pairs), and the dump then loses the space: "place.This".
+KERNING_GAP = re.compile(r"(?<=[A-Za-z][.,;:?!])(?=[TVWY][a-z]|“)")
+
+
+def apply_line_fixes(lines, cfg, log=None, page=None):
+    """Apply a source's exact line replacements and kerning-gap repair.
+
+    line_fixes maps a whole stripped line to its replacement, for text the
+    dump mangled beyond rule-based repair (letter-spaced headings). A
+    replacement may contain newlines: an empty line around a heading makes
+    it a block of its own. kerning_spaces restores the space the dump lost
+    after punctuation before T, V, W, Y, or an opening quotation mark.
+    """
+    fixes = cfg.get("line_fixes", {})
+    out = []
+    for ln in lines:
+        s = ln.strip()
+        if s in fixes:
+            _log(log, page, "line-fixed", "%s -> %s" % (s, fixes[s].strip() or "(dropped)"))
+            out.extend(fixes[s].split("\n") if fixes[s] else [])
+            continue
+        if cfg.get("kerning_spaces"):
+            fixed = KERNING_GAP.sub(" ", ln)
+            if fixed != ln:
+                _log(log, page, "kerning-space", " | ".join(m.group(0) for m in re.finditer(r"\S*[.,;:?!](?:[TVWY][a-z]|“)\S*", ln)))
+                ln = fixed
+        out.append(ln)
+    return out
+
+
+def _cut_page(lines, first_line=None, stop_line=None, log=None, page=None):
+    """Keep a page's lines from first_line on and before stop_line (prefix matches)."""
+    lines = list(lines)
+    if first_line:
+        idx = next((i for i, ln in enumerate(lines) if ln.strip().startswith(first_line)), None)
+        if idx is None:
+            raise SystemExit("page %s: first_line %r not found" % (page, first_line))
+        for ln in lines[:idx]:
+            if ln.strip():
+                _log(log, page, "heading-stripped", ln.strip())
+        lines = lines[idx:]
+    if stop_line:
+        idx = next((i for i, ln in enumerate(lines) if ln.strip().startswith(stop_line)), None)
+        if idx is None:
+            raise SystemExit("page %s: stop_line %r not found" % (page, stop_line))
+        lines = lines[:idx]
+    return lines
+
+
+class TxtSource:
+    """A paged .txt source with its per-source cleanup settings."""
+
+    def __init__(self, cfg, log=None):
+        self.cfg = cfg
+        self.log = log
+        self.pages = txt_page_texts(os.path.join(SOURCES, cfg["txt"]))
+        self.width = cfg.get("line_width") or txt_line_width(self.pages)
+        # Spelling evidence comes from ordinary lines only: an overlong line in
+        # a dehyphenating dump holds a join whose spelling is in question.
+        lines = [clean_txt_line(ln, cfg) for p in self.pages for ln in p.splitlines()]
+        counts = Counter(w.lower() for ln in lines for w in WORD.findall(ln))
+        if cfg.get("dehyphenated"):
+            lines = [ln for ln in lines if len(ln.strip()) <= 1.3 * self.width]
+        ev = DocEvidence(w.lower() for ln in lines for w in WORD.findall(ln))
+        ev.hyphenates = cfg.get("hyphenates", True)
+        ev.counts = counts
+        self.ev = ev
+
+    def page_lines(self, no, first_line=None, stop_line=None):
+        """Cleaned lines of PDF page no, cut to a unit's boundaries."""
+        lines = [clean_txt_line(ln, self.cfg) for ln in self.pages[no - 1].splitlines()]
+        lines = apply_line_fixes(lines, self.cfg, self.log, no)
+        # Drop caps first: a lone capital would otherwise read as a running head.
+        lines = join_drop_caps(lines, self.log, no)
+        lines = strip_txt_furniture(lines, self.cfg, self.log, no)
+        return _cut_page(lines, first_line, stop_line, self.log, no)
+
+    def unit_pages(self, start, end, first_line=None, stop_line=None):
+        pages = []
+        for no in range(start, end + 1):
+            lines = self.page_lines(no, first_line if no == start else None, stop_line if no == end else None)
+            pages.append((no, txt_paragraphs(lines, self.cfg, self.ev, self.width, self.log, no)))
+        return pages
+
+    def notes_for(self, key):
+        """Pages of the endnotes printed for one chapter, cut at the chapter headings."""
+        notes = self.cfg["notes"]
+        heading = re.compile(notes["heading"])
+        out, active = [], False
+        for no in range(notes["start"], notes["end"] + 1):
+            lines = self.page_lines(no)
+            kept = []
+            for ln in lines:
+                m = heading.match(ln.strip())
+                if m:
+                    active = m.group(1) == str(key)
+                    continue
+                if active:
+                    kept.append(ln)
+            if any(ln.strip() for ln in kept):
+                start = re.compile(notes.get("para_start", r"^\d{1,3}\.\s"))
+                out.append((no, txt_paragraphs(kept, self.cfg, self.ev, self.width, self.log, no, start)))
+        return out
+
+
+NOTES_LABEL = "Notes to this chapter (printed at the back of the book):"
+
+
+def _prefix_quote(para):
+    """Put the block-quote prefix before a paragraph's text, after a leading page marker."""
+    m = re.match(r"(<!-- page \d+ -->\n)?", para)
+    return para[:m.end()] + BLOCK_QUOTE_PREFIX + para[m.end():]
+
+
+def _restructure_for_quotes(paras, fixes, log=None):
+    """Apply the join, start, and end fixes of mark_block_quotes.
+
+    Returns (paragraphs, indexes where a quotation starts, indexes where one
+    ends). Joins and splits change only paragraph breaks: a join puts back
+    the single space the break replaced (a page marker on its own line moves
+    inline), and a split replaces the space before or after the given text.
+    """
+    paras = list(paras)
+    for suffix in fixes.get("join", []):
+        for i in range(len(paras) - 1):
+            if strip_comments(paras[i]).rstrip().endswith(suffix):
+                nxt = re.sub(r"^(<!-- page \d+ -->)\n", r"\1 ", paras[i + 1])
+                _log(log, "", "blockquote-fixed", "join (config, checked by coordinator): %s" % suffix)
+                paras[i:i + 2] = [paras[i] + " " + nxt]
+                break
+    # Flags per paragraph, kept in step with the list as splits insert items.
+    start_at, end_at = [False] * len(paras), [False] * len(paras)
+    for kind in ("start", "end"):
+        for frag in fixes.get(kind, []):
+            for i, p in enumerate(paras):
+                pos = p.find(frag)
+                if pos < 0:
+                    continue
+                cut = pos if kind == "start" else pos + len(frag)
+                head, tail = p[:cut].rstrip(" "), p[cut:].lstrip(" ")
+                if not head.strip() or not tail.strip():
+                    raise SystemExit("block_quote_fixes %s: %r is at a paragraph edge; no split needed" % (kind, frag))
+                paras[i:i + 1] = [head, tail]
+                start_at[i:i + 1] = [start_at[i], kind == "start"]
+                end_at[i:i + 1] = [kind == "end", end_at[i]]
+                _log(log, "", "blockquote-fixed", "%s (config, checked by coordinator): %s" % (kind, frag))
+                break
+    forced_start = {i for i, f in enumerate(start_at) if f}
+    forced_end = {i for i, f in enumerate(end_at) if f}
+    return paras, forced_start, forced_end
+
+
+def mark_block_quotes(paras, log=None, fixes=None, item_start=None):
+    """Prefix the paragraphs of each block quotation with "> ".
+
+    A quotation starts after a lead-in paragraph ending in a colon and runs
+    to the first paragraph, within BLOCK_QUOTE_WINDOW, that ends in a block
+    citation; with no citation in reach only the first paragraph is marked.
+    A paragraph ending in a block citation with no lead-in is marked alone,
+    and so is an epigraph (a paragraph ending in a dash and attribution).
+    Scanning stops at a heading, a new lead-in, or an item_start paragraph
+    (note numbers), which never starts a quotation. Every quotation is
+    logged; the kinds other than "blockquote" (lead-in and citation both
+    found) need the coordinator's review.
+
+    fixes, all set by hand after review; a string that matches nothing in
+    this unit is ignored here and reported by check_block_quote_fixes:
+      join    end of a colon lead-in that does not open a block quotation
+              (the author's sentence runs on): the paragraph is joined to
+              the next with a space, as printed.
+      start   text where a block quotation begins inside a paragraph (a
+              lead-in without a colon, or the dump lost the break): the
+              paragraph is split before it, and the quotation runs from there
+              like one after a colon lead-in.
+      end     final text of a block quotation that runs on into the author's
+              prose in the dump: the paragraph is split after it.
+      add, remove   paragraph-text prefixes (page markers ignored) to mark or
+              unmark. Each must match at most one paragraph.
+    """
+    fixes = fixes or {}
+    paras, forced_start, forced_end = _restructure_for_quotes(paras, fixes, log)
+    text = [strip_comments(p).strip() for p in paras]
+    n = len(text)
+    quoted = [False] * n
+    pages, cur = [], None  # page each paragraph starts on, for the log
+    for p in paras:
+        m = re.match(r"<!-- page (\d+) -->", p)
+        cur = int(m.group(1)) if m else cur
+        pages.append(cur)
+        marks = re.findall(r"<!-- page (\d+) -->", p)
+        cur = int(marks[-1]) if marks else cur
+
+    def item(k):
+        return item_start is not None and item_start.match(text[k])
+
+    def stops(k):
+        return is_heading(text[k]) or item(k) or text[k] == NOTES_LABEL
+
+    for i in range(n):
+        lead = text[i - 1] if i else ""
+        led = lead.endswith(":") and lead != NOTES_LABEL
+        # A short verse line after a lead-in reads as a heading; only a
+        # note number or the notes label stops a quotation from starting.
+        if quoted[i] or not (led or i in forced_start) or item(i) or text[i] == NOTES_LABEL:
+            continue
+        end = None
+        for k in range(i, min(n, i + BLOCK_QUOTE_WINDOW)):
+            if k > i and (stops(k) or text[k - 1].endswith(":") and k - 1 > i):
+                break
+            if BLOCK_CITATION.search(text[k]) or CITATION_ONLY.match(text[k]) or k in forced_end:
+                end = k
+                break
+        if end is None:
+            _log(log, pages[i], "blockquote-nocite", "%s | %s... | next: %s" % (lead[-40:], text[i][:50], text[i + 1][:40] if i + 1 < n else ""))
+            end = i
+        elif end > i:
+            _log(log, pages[i], "blockquote-multi", "%d paragraphs: %s | %s ... %s" % (end - i + 1, lead[-40:], text[i][:40], text[end][-40:]))
+        else:
+            _log(log, pages[i], "blockquote", "%s | %s ... %s" % (lead[-40:], text[i][:40], text[i][-40:]))
+        for k in range(i, end + 1):
+            quoted[k] = True
+    for i in range(n):
+        if not quoted[i] and EPIGRAPH.search(text[i]) and not item(i):
+            quoted[i] = True
+            _log(log, pages[i], "blockquote-epigraph", "%s ... %s" % (text[i][:50], text[i][-50:]))
+        if not quoted[i] and BLOCK_CITATION.search(text[i]) and not item(i):
+            quoted[i] = True
+            _log(log, pages[i], "blockquote-no-leadin", "prev: %s | %s ... %s" % (text[i - 1][-40:] if i else "", text[i][:50], text[i][-40:]))
+    for kind, value in (("add", True), ("remove", False)):
+        for prefix in fixes.get(kind, []):
+            hits = [k for k in range(n) if text[k].startswith(prefix)]
+            if len(hits) > 1:
+                raise SystemExit("block_quote_fixes %s: %r matches %d paragraphs" % (kind, prefix, len(hits)))
+            for k in hits:
+                quoted[k] = value
+                _log(log, pages[k], "blockquote-fixed", "%s (config, checked by coordinator): %s" % (kind, prefix))
+    return [_prefix_quote(p) if q else p for p, q in zip(paras, quoted)]
+
+
+def check_block_quote_fixes(cfg, folder):
+    """Return the (kind, text) block_quote_fixes that match nothing in any chapter file.
+
+    add and remove must start a paragraph; join, start, and end must occur
+    somewhere in a chapter's text.
+    """
+    fixes = cfg.get("block_quote_fixes", {})
+    bodies = []
+    for name in sorted(os.listdir(folder)):
+        with open(os.path.join(folder, name), encoding="utf-8") as f:
+            bodies.append(f.read())
+    paras = [strip_comments(p).strip().removeprefix(BLOCK_QUOTE_PREFIX) for b in bodies for p in b.split("\n\n")]
+    missing = [(kind, p) for kind in ("add", "remove") for p in fixes.get(kind, [])
+               if not any(q.startswith(p) for q in paras)]
+    missing += [(kind, t) for kind in ("join", "start", "end") for t in fixes.get(kind, [])
+                if not any(t in b for b in bodies)]
+    return missing
+
+
+def make_txt_extractor(cfg, log=None):
+    src = TxtSource(cfg, log)
+    print("%s: line width %d" % (cfg["txt"], src.width))
+
+    def extractor(ch):
+        if log is not None:
+            log.unit = ch["unit_id"]
+        paras = join_pages(src.unit_pages(ch["start"], ch["end"], ch.get("first_line"), ch.get("stop_line")), src.ev, log)
+        bq = cfg.get("block_quotes", False)
+        fixes = cfg.get("block_quote_fixes")
+        if bq:
+            paras = mark_block_quotes(paras, log, fixes)
+        if ch.get("notes") is not None:
+            notes = src.notes_for(ch["notes"])
+            if not notes:
+                raise SystemExit("%s: no notes found for chapter key %r" % (ch["unit_id"], ch["notes"]))
+            note_paras = join_pages(notes, src.ev, log)
+            if bq:
+                start = re.compile(cfg["notes"].get("para_start", r"^\d{1,3}\.\s"))
+                note_paras = mark_block_quotes(note_paras, log, fixes, start)
+            note_paras[0] = re.sub(r"^(<!-- page \d+ -->\n)?", lambda m: (m.group(0) or "") + NOTES_LABEL + "\n\n", note_paras[0], count=1)
+            paras += note_paras
+        return paras
+
+    return extractor
+
+
+def save_txt_raw(cfg):
+    """Save every page of a paged .txt source, before cleanup, with page markers."""
+    folder = os.path.join(RAW, cfg["slug"])
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "raw.txt")
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        for i, page in enumerate(txt_page_texts(os.path.join(SOURCES, cfg["txt"])), 1):
+            f.write(PAGE_MARKER % i + "\n" + page + "\n")
+    return path
+
+
 def last_alpha(text):
     m = re.search(r"([A-Za-z]+)[^A-Za-z]*$", text)
     return m.group(1) if m else ""
@@ -619,7 +1197,10 @@ def continues_across(a, b):
     a lowercase continuation or ends in a hyphen. A block that starts with a
     list or note marker is a new item.
     """
-    if LIST_MARKER.match(b):
+    # "(Marlow 1980," / "240) creates" is a citation running on, not a list item.
+    # Legal "Harlan" / "v. Pell County" runs on too.
+    citation = a.rstrip().endswith(",") and re.match(r"\d{1,4}\)", b)
+    if LIST_MARKER.match(b) and not citation and not re.match(r"v\. [A-Z]", b):
         return False
     if re.search(r"[A-Za-z0-9]-$", a):
         return True
@@ -720,9 +1301,9 @@ def make_extractor(cfg, log=None):
 
 def validate_config(cfg):
     errors = []
-    src = cfg.get("slug") or cfg.get("pdf") or cfg.get("epub")
+    src = cfg.get("slug") or cfg.get("pdf") or cfg.get("epub") or cfg.get("txt")
     if not cfg.get("slug"):
-        errors.append("source %r has no slug" % (cfg.get("pdf") or cfg.get("epub")))
+        errors.append("source %r has no slug" % (cfg.get("pdf") or cfg.get("epub") or cfg.get("txt")))
     epub = bool(cfg.get("epub"))
     seen = set()
     for ch in cfg["chapters"]:
@@ -796,7 +1377,26 @@ def build_markdown(src_title, part, chapters, extractor, slug, pdf=""):
 
 if __name__ == "__main__":
     ran = False
+    only = set(sys.argv[1:])  # optional: slugs to extract; default all
     for cfg in SOURCES_CONFIG:
+        if only and cfg.get("slug") not in only:
+            continue
+        if cfg.get("txt"):
+            if not cfg["chapters"]:
+                continue
+            problems = validate_config(cfg)
+            if problems:
+                raise SystemExit("SOURCES_CONFIG errors:\n  " + "\n  ".join(problems))
+            ran = True
+            print("raw text -> %s" % save_txt_raw(cfg))
+            log = RepairLog()
+            build_markdown(cfg["title"], cfg["part"], cfg["chapters"], make_txt_extractor(cfg, log), cfg["slug"], cfg["txt"])
+            for kind, prefix in check_block_quote_fixes(cfg, os.path.join(OUT, cfg["slug"])):
+                print("WARNING block_quote_fixes %s matches no paragraph: %r" % (kind, prefix))
+            log_path = os.path.join(RAW, cfg["slug"], "repairs.tsv")
+            log.write(log_path)
+            print("repair log: %d entries -> %s" % (len(log.rows), log_path))
+            continue
         if cfg.get("epub"):
             if not cfg["chapters"]:
                 continue

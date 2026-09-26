@@ -57,7 +57,7 @@ line per material finding.
 Check, in priority order:
 
 1. **Accuracy and attribution.** Every name, number, date, quantity, place, and ordering in the summary is supported by the source. Check uncertainty, negation, and causal strength ("contributed to" against "caused"). The author's own view stays distinct from views the author quotes, describes, attributes to others, or rejects.
-2. **Preservation.** Apply rule (a)-(e) in `writing-rules.md`. Each loss is material.
+2. **Preservation.** Apply rule (a)-(e) in `writing-rules.md`. Each loss is material. Apply the block-quotation rule too: a `> ` quotation in the source appears in the summary whole and exact, or not at all; paraphrasing, condensing, or partially quoting one is material.
 3. **Coverage.** Work from source to summary. Find main arguments, consequential qualifications, and supporting evidence that are missing. Judge by importance to the chapter's argument, not by volume.
 4. **Fabrication.** Any claim, explanation, figure, or connecting assertion the source does not support.
 5. **Internal consistency.** Contradictions, garbled sentences, dangling references, leftover page markers, citations, or review notes.
@@ -160,7 +160,7 @@ Source ambiguities and anything needing the original document. Do not reconstruc
 
 ## Pacing
 
-Round sizes follow the usage window, not the chapter count. In one run, a 23-chapter first round exhausted the window and ran into paid credits; 11-chapter rounds, dispatched as batches of 6 and 5, then fit. Measure the cost of the first batch, then size rounds to end at the project's stopping level (default 95% of the window; see plan.md, Step 1, Usage). Record readings in the usage log.
+Round sizes follow the usage window, not the chapter count. In one run, a 23-chapter first round exhausted the window and ran into paid credits; 11-chapter rounds, dispatched as batches of 6 and 5, then fit. Measure the cost of the first batch, then size rounds to end at about 90% of the window. Record readings in the usage log.
 
 ## Status
 

@@ -158,6 +158,11 @@ def paragraph_units(body):
     return out
 
 
+def is_block_quote(text):
+    """True if a paragraph is a block quotation (Markdown "> ", after any page marker)."""
+    return strip_comments(text).lstrip().startswith(">")
+
+
 def sentence_units(body, a, b):
     """Split one paragraph span at sentence boundaries, keeping whitespace."""
     cuts = [a]
@@ -179,7 +184,10 @@ def make_parts(body, limit):
     units = []
     oversized = 0
     for a, b in paragraph_units(body):
-        if size(body[a:b]) > limit:
+        if size(body[a:b]) > limit and is_block_quote(body[a:b]):
+            oversized += 1  # a block quotation is never split mid-quotation
+            units.append((a, b))
+        elif size(body[a:b]) > limit:
             pieces = sentence_units(body, a, b)
             oversized += sum(1 for x, y in pieces if size(body[x:y]) > limit)
             units.extend(pieces)
@@ -196,10 +204,13 @@ def make_parts(body, limit):
         s = sizes[i]
         text = strip_comments(body[a:b]).strip()
         remaining = total - consumed
+        prev = body[units[i - 1][0]:units[i - 1][1]] if i else ""
         can_break = (
             cur_size > 0
-            and ends_sentence(body[units[i - 1][0]:units[i - 1][1]])
+            and ends_sentence(prev)
             and not text[:1].islower()
+            # Keep a multi-paragraph block quotation (verse) in one part.
+            and not (is_block_quote(text) and is_block_quote(prev))
         )
         if can_break and (
             cur_size + s > limit

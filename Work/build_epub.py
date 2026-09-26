@@ -28,6 +28,7 @@ body { font-family: Georgia, "Times New Roman", serif; line-height: 1.5; margin:
 h1 { font-size: 1.6em; line-height: 1.3; margin: 2em 0 0.6em; text-align: center; }
 h2 { font-size: 1.3em; line-height: 1.35; margin: 1em 0 0.6em; }
 h3 { font-size: 1.05em; font-style: italic; margin: 1.2em 0 0.3em; }
+blockquote { margin: 0 2em 0.65em; font-size: 0.95em; }
 p { margin: 0 0 0.65em; text-align: justify; }
 """
 

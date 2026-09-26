@@ -379,3 +379,129 @@ class LonePunctuation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PagedText(unittest.TestCase):
+    """The paged .txt path: furniture, drop caps, dehyphenation, paragraphs."""
+
+    def test_running_heads_and_page_number_dropped_from_top(self):
+        cfg = {"header_patterns": [r"^[A-Z][A-Z’'.,:&\- ]+$"]}
+        lines = ["4", "", "HARBOR", "", "TOWN HISTORY", "", "connections to the text."]
+        self.assertEqual([l for l in extract.strip_txt_furniture(lines, cfg) if l], ["connections to the text."])
+
+    def test_header_scan_stops_at_first_body_line(self):
+        cfg = {"header_patterns": [r"^[A-Z][A-Z ]+$"]}
+        lines = ["HARBOR", "Body text starts here.", "ALL CAPS BODY LINE"]
+        self.assertEqual([l for l in extract.strip_txt_furniture(lines, cfg) if l],
+                         ["Body text starts here.", "ALL CAPS BODY LINE"])
+
+    def test_drop_cap_joins_word_or_stays_a_word(self):
+        self.assertEqual([l for l in extract.join_drop_caps(["I", "", "n 1831 Edith"]) if l], ["In 1831 Edith"])
+        self.assertEqual([l for l in extract.join_drop_caps(["U", "", ".S. Navy ships"]) if l], ["U.S. Navy ships"])
+        self.assertEqual([l for l in extract.join_drop_caps(["I", "", "initially wrote"]) if l], ["I initially wrote"])
+        self.assertEqual([l for l in extract.join_drop_caps(["“", "I", "", "n order to"]) if l], ["“In order to"])
+
+    def test_compound_hyphen_restored_by_document_majority(self):
+        ev = DocEvidence()
+        ev.counts = {"working-class": 40, "workingclass": 5, "antiracist": 9, "anti-racist": 1}
+        long_line = "x " * 60 + "workingclass women and antiracist work"
+        out = extract.restore_compound_hyphens(long_line, ev, 76)
+        self.assertIn("working-class women", out)
+        self.assertIn("antiracist work", out)
+
+    def test_compound_hyphen_fix_list_applies(self):
+        ev = DocEvidence()
+        ev.counts = {}
+        out = extract.restore_compound_hyphens("the groupderived view", ev, 76, fixes={"groupderived": "group-derived"})
+        self.assertEqual(out, "the group-derived view")
+
+    def test_kerning_gap_restored(self):
+        cfg = {"kerning_spaces": True}
+        self.assertEqual(extract.apply_line_fixes(["the place.This is U.S.West and asked,“How"], cfg),
+                         ["the place. This is U.S. West and asked, “How"])
+
+    def test_line_fix_can_make_a_heading_block(self):
+        cfg = {"line_fixes": {"O b j e c t s": "\nObjects\n"}}
+        self.assertEqual(extract.apply_line_fixes(["O b j e c t s", "Body."], cfg), ["", "Objects", "", "Body."])
+
+    def test_paragraphs_break_at_short_sentence_end_and_colon(self):
+        lines = ["A full line of ordinary text that runs to the margin and on and on", "and ends here.",
+                 "Next paragraph starts and it also runs all the way to the right margin", "describes this:",
+                 "I used to feel that the boats would not come back, and this line runs long", "(Marlow 1986, 82)"]
+        paras = extract.txt_paragraphs(lines, {}, DocEvidence(), 70)
+        self.assertEqual(len(paras), 3)
+        self.assertTrue(paras[1].endswith("describes this:"))
+
+    def test_note_numbers_start_paragraphs(self):
+        import re
+        lines = ["1. First note text that runs on for a while and on to the right margin here", "ends here without much room left in the line",
+                 "2. Second note."]
+        paras = extract.txt_paragraphs(lines, {}, DocEvidence(), 70, para_start=re.compile(r"^\d{1,3}\.\s"))
+        self.assertEqual(len(paras), 2)
+
+
+class BlockQuotes(unittest.TestCase):
+    """Block quotations are marked "> " so agents can tell them from the author's prose."""
+
+    def test_colon_lead_in_to_block_citation(self):
+        paras = ["Ines Marlow describes this change:", "I used to feel that. (Marlow 1986, 82)", "The author resumes."]
+        out = extract.mark_block_quotes(paras)
+        self.assertEqual(out, [paras[0], "> I used to feel that. (Marlow 1986, 82)", "The author resumes."])
+
+    def test_verse_runs_to_standalone_citation_and_keeps_page_marker_first(self):
+        paras = ["She sings:", "The tide came in.", "<!-- page 5 -->\nThe boats came home, late.", "(Penhale 1982, 133)", "Prose."]
+        out = extract.mark_block_quotes(paras)
+        self.assertEqual(out[1:4], ["> The tide came in.", "<!-- page 5 -->\n> The boats came home, late.", "> (Penhale 1982, 133)"])
+        self.assertEqual(out[4], "Prose.")
+
+    def test_no_citation_marks_first_paragraph_only_and_logs_it(self):
+        log = RepairLog()
+        out = extract.mark_block_quotes(["He said:", "Quoted words here.", "Her own prose."], log)
+        self.assertEqual(out[1:], ["> Quoted words here.", "Her own prose."])
+        self.assertIn("blockquote-nocite", log.kinds())
+
+    def test_short_verse_line_after_lead_in_is_not_taken_for_a_heading(self):
+        out = extract.mark_block_quotes(["Consider this verse:", "Low the moon and long the road", "(Penhale 1984, 144)"])
+        self.assertTrue(out[1].startswith("> "))
+
+    def test_citation_without_lead_in_and_epigraph(self):
+        out = extract.mark_block_quotes(["For centuries the valley served. (Arden 1981, 42)",
+                                         "The river keeps its counsel so far as I can see. —Ada Penhale 1937, 16",
+                                         "Her words end “here” (Smith 1990, 4)."])
+        self.assertEqual([p[:2] for p in out], ["> ", "> ", "He"])
+
+    def test_note_numbers_never_start_a_quotation(self):
+        import re
+        out = extract.mark_block_quotes(["1. A note ending:", "2. Next note."], item_start=re.compile(r"^\d{1,3}\.\s"))
+        self.assertEqual(out, ["1. A note ending:", "2. Next note."])
+
+    def test_fixes_join_start_add_remove(self):
+        fixes = {"join": ["control of knowledge:"], "start": ["In the harbor novels"],
+                 "add": ["When will you come?"], "remove": ["Dealing with"]}
+        paras = ["They exercise control of knowledge:", "<!-- page 81 -->\nThey are the planners.",
+                 "It is essential. In the harbor novels this change occurs. (Lund 1983, xxiv)",
+                 "She sings:", "Where did you go?", "When will you come?",
+                 "Dealing with it, “we are late” (Arden 1996, 106)"]
+        out = extract.mark_block_quotes(paras, fixes=fixes)
+        self.assertEqual(out, [
+            "They exercise control of knowledge: <!-- page 81 --> They are the planners.",
+            "It is essential.",
+            "> In the harbor novels this change occurs. (Lund 1983, xxiv)",
+            "She sings:", "> Where did you go?", "> When will you come?",
+            "Dealing with it, “we are late” (Arden 1996, 106)"])
+
+    def test_colon_line_breaks_paragraph_before_capital_but_not_lowercase(self):
+        cfg = {"block_quotes": True}
+        lines = ["A line of ordinary text that runs to the margin and describes this:",
+                 "They are the planners of work.",
+                 "Prose runs to the margin again and creates three characters:",
+                 "a young domestic worker and a mother in her thirties."]
+        paras = extract.txt_paragraphs(lines, cfg, DocEvidence(), 70)
+        self.assertEqual(len(paras), 3)
+        self.assertTrue(paras[2].startswith("Prose runs") and paras[2].endswith("thirties."))
+
+    def test_block_citation_line_ends_paragraph_at_any_width(self):
+        cfg = {"block_quotes": True}
+        lines = ["quoted words that run all the way to the right margin and end. (Marlow 1986, 82)",
+                 "The harbor workers have been talking about it ever since then."]
+        self.assertEqual(len(extract.txt_paragraphs(lines, cfg, DocEvidence(), 70)), 2)

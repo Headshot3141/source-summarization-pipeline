@@ -44,6 +44,8 @@ Default setup (plan.md, Agents). Change these rows only if the project uses anot
 - `repairs.tsv` reviewed: every `uncertain`, `-midword`, and `page-break-unjoined` line checked against the page image, and the result:
 - Pages sampled against the originals, including difficult layouts and repaired text:
 - Figures and tables inspected; visual transcriptions added:
+- Block quotations marked (`> `): detection method, count, weaker-evidence log lines and a full listing reviewed, hand fixes:
+- Detected headings listed and checked for split or letter-spaced headings:
 - Open extraction issues (blocking? y/n):
 
 ## Size Limits and Chapter Splitting
