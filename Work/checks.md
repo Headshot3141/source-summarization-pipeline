@@ -24,13 +24,13 @@ Do not trust PDF title metadata; it can be junk. Confirm title and author from t
 
 | Role | Model | Context | Effective output cap | Reasoning setting | Concurrency |
 |---|---|---|---|---|---|
-| Summarizer | Claude Opus 5.5 (Claude Code subagent, `model: "opus"`) | | No truncation (see below) | | |
-| Reviewer | Claude Opus 5.5 (Claude Code subagent) | | No truncation (see below) | | |
-| Verifier / later passes | Claude Opus 5.5 (Claude Code subagent) | | No truncation (see below) | | |
+| Summarizer | Claude Sonnet 5.5 (Claude Code subagent, `summarizer` agent type, `model: claude-sonnet-5-5`) | | Probe before dispatch (see below) | `effort: high` | |
+| Reviewer | Claude Opus 5.5 (Claude Code subagent, `model: "opus"`) | | No truncation (see below) | | |
+| Verifier / later passes | Claude Opus 5.5 (Claude Code subagent, `model: "opus"`) | | No truncation (see below) | | |
 
 Default setup (plan.md, Agents). Change these rows only if the project uses another model or harness.
 
-- How the output cap is set, and the probe that proved it (finish reasons, largest total seen, no truncated `length` finishes): Default setup, probe not needed. On 2026-09-26 an Opus 5.5 subagent in Claude Code wrote 8,669 words (160 paragraphs, end sentinel present) in one Write call, with no cut-off and no error. Re-probe only for another harness or model.
+- How the output cap is set, and the probe that proved it (finish reasons, largest total seen, no truncated `length` finishes): Opus 5.5 roles, probe not needed. On 2026-09-26 an Opus 5.5 subagent in Claude Code wrote 8,669 words (160 paragraphs, end sentinel present) in one Write call, with no cut-off and no error. Sonnet 5.5 summarizer: not yet probed; record the probe result here before dispatching drafts. Re-probe for another harness or model.
 - Provider exclusions or retry rules:
 - Usage-window cost per task, measured in the pilot:
 
