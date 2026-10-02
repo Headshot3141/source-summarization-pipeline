@@ -26,15 +26,16 @@ A sentence that is plain but clear is finished. Leave it alone. Churn is a cost,
 ## What to fix, in priority order
 
 1. Tangled sentences: garden paths, stacked clauses, misattached modifiers, gapped verbs, a negation or "but not" whose scope is unclear.
-2. Unclear pronoun reference. Replace the pronoun with the name only when the neighbouring text establishes it. Otherwise report it.
-3. Em dashes outside quotations.
-4. Formulaic "not X but Y".
-5. Filler and formulaic transitions.
-6. Awkward passive voice where the actor is named in the text.
-7. Vague declaratives that say nothing specific.
-8. Unnecessary intensifiers ("very", "quite", "significantly", "notably"). Check rule (b) first: a word expressing degree or uncertainty stays.
-9. Monotonous rhythm: three or more sentences of the same shape, or paragraphs opening the same way.
-10. Repeated tics within a chapter.
+2. Unclear pronoun reference. Replace the pronoun with the name only when the neighbouring text establishes it. Otherwise report it. If the pronoun refers to the author and the paragraph already names the author, recast the sentence instead (see the next item).
+3. Repeated references to the author. The naming rule in `writing-rules.md` allows one per paragraph: the opening attribution covers the rest. Where sentence after sentence opens "X argues", "the author notes", or a pronoun, keep the first reference and recast the others so the claim itself is the subject. Keep a second reference only where the paragraph also reports another speaker's view and the return to the author needs a marker. Every claim stays attributed: a claim covered by no attribution in its paragraph keeps its own.
+4. Em dashes outside quotations.
+5. Formulaic "not X but Y".
+6. Filler and formulaic transitions.
+7. Awkward passive voice where the actor is named in the text.
+8. Vague declaratives that say nothing specific.
+9. Unnecessary intensifiers ("very", "quite", "significantly", "notably"). Check rule (b) first: a word expressing degree or uncertainty stays.
+10. Monotonous rhythm: three or more sentences of the same shape, or paragraphs opening the same way.
+11. Repeated tics within a chapter.
 
 ## What to leave alone
 
@@ -97,7 +98,7 @@ The agent reads the brief only through this section, so the status tables below 
 
 **Gate after each batch.**
 
-1. Run `python Work/check_style_pass.py`. It compares every summary with the archive and flags changed quotations, numbers, headings, paragraph counts, and any drop in protected hedge, contrast, or attribution markers.
+1. Run `python Work/check_style_pass.py`. It compares every summary with the archive and flags changed quotations, numbers, headings, paragraph counts, and any drop in protected hedge, contrast, or attribution markers. Then run `python Work/check_author_refs.py` on the batch's files. Any paragraph it still flags should have another speaker's view that justifies the second reference.
 2. Investigate every flag. `NUMBER ORDER` means the same numbers were reordered; confirm each still attaches to the right claim. A protected-marker flag on "according to", "while", or "yet" may be a non-attributive or temporal sense.
 3. Read the before-and-after quotes in each record for edits touching hedges, contrasts, attribution, or numbers. Spot-check referent substitutions against the archive, and against the chapter source when the choice is not obvious from the text: an agent resolving a pronoun without the source can pick the nearest name.
 4. Correct a bad edit directly and note it in the record.

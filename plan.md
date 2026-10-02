@@ -37,13 +37,16 @@ These shaped the rest of this plan. Read them before the pilot.
 - **The harness can truncate silently.** An agent harness (opencode) capped per-request output below the model's limit, and agents ended at the cap with no output and no error. Claude Code subagents, the default setup (see Agents), were probed and do not do this. Probe the effective cap before dispatch only when using another harness or a model with a lower output limit (Step 1).
 - **Usage windows, not chapter counts, set batch size.** Measure cost per task in the pilot and size rounds to fit.
 - **Per-chapter ranges do not bound the total.** Chapters clustered near the top of their ranges, and the overall ratio ran well above the target. Track the aggregate.
+- **Attribution applied sentence by sentence buries the prose in the author's name.** In one run, a book's summary named its author 329 times in about 27,000 words, and 124 sentences opened with the name. Agents attached "X argues" to every claim, and verification added more. Then a pronoun rule (the source never gendered the author, who wrote in the first person) was applied by replacing every "he" with the name across the files. The fix is the naming rule in `writing-rules.md`: one reference to the author per paragraph, with the opening attribution covering the sentences after it. `Work/check_author_refs.py` enforces it, and every prompt carries the source's naming convention from the start. Never fix pronouns or names by mechanical find-and-replace: recast each paragraph.
 
 ## Sources
 
-| Part | Source file | Format | Author(s) | Role | Target ratio |
-|---|---|---|---|---|---|
-| 1 | `Sources/<file>` | PDF | | | 0.40 |
-| 2 | `Sources/<file>` | EPUB | | | 0.40 |
+| Part | Source file | Format | Author(s) | Role | Target ratio | Naming convention |
+|---|---|---|---|---|---|---|
+| 1 | `Sources/<file>` | PDF | | | 0.40 | |
+| 2 | `Sources/<file>` | EPUB | | | 0.40 | |
+
+The naming convention is how the summaries refer to each author: the name form ("Penhale", "the authors" for a co-written book), and the pronoun the source uses for the author, or "no pronoun" when the source never genders the author. Never infer a pronoun from a name. For an interview collection, give the interviewer and each interviewee. Settle it in Preflight, with the user if the source is unclear. Every prompt carries it as `AUTHOR`, and it always comes with the once-per-paragraph naming rule.
 
 For each PDF, check whether the text layer is usable. Run OCR on scanned PDFs and on the scanned pages of mixed PDFs. Text extraction can miss figures, tables, and captions, so inspect them when they support substantive claims. When a PDF's text layer is damaged (ligatures mapped to wrong characters, missing spaces) and an EPUB of the same edition exists, extract from the EPUB. Confirm titles and authors from the title page, not PDF metadata.
 
@@ -58,6 +61,7 @@ Work/
   check_parts.py                    checks source reconstruction, boundaries, sizes, and counts
   make_review_queue.py              builds the review queue from the parts manifest
   check_words.py                    checks summary word counts against budgets
+  check_author_refs.py              flags paragraphs that refer to the author more than once
   count_words.py                    shared counting function and single-file word-count command
   common.py                         shared paths, frontmatter parsing, and owned-text markers
   set_status.py                     coordinator status updates, kept in sync across both manifests
@@ -167,6 +171,7 @@ Repeat the table for each source, then give the grand total and overall ratio.
 - **Agent limits.** Record each role's model, context window, and effective per-request output cap, and the file-size limits for agent inputs: a 29KB body-text target and a 32KB hard cap per assigned chapter or part source file (1KB = 1,000 bytes). Larger source files caused agent timeouts even when they fit the context window. For each task, estimate the full input and required output: instructions, source, any summary under review, and a safety margin.
 - **Probe the output cap (other harnesses only).** Skip this with the default setup: Claude Code subagents were probed and do not truncate, and Sonnet 5.5 and Opus 5.5 share the same 128K-token output limit (see Agents). Record the skip and cite that probe in `Work/checks.md`. For any other harness, or a model with a lower output limit: a harness can impose its own cap below the model's limit, and reasoning tokens usually share it. An agent that hits the cap ends with finish reason `length`, often with no output and no error. Run a throwaway probe task, confirm from the harness's logs or message store that no step finished at `length` and that totals exceed the old cap, and record the result. Example: opencode 1.18 caps output at 32,000 tokens unless `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX` is set before it starts; `start-opencode.bat` sets it. Do not dispatch summarizers or reviewers until the probe passes.
 - **Usage.** If the account has a usage window, record how it is read and the level at which the user stops. The default stopping level is 95% of the 5-hour window; with the default setup's subagents it takes a lot of work to fill the window, so the margin can be small. Use a different level if the user sets one. In the Claude Code desktop app the coordinator can read the plan's 5-hour and weekly windows itself (the session-management usage tool), so it can check before each batch without asking. Measure cost per task in the pilot.
+- **Naming convention.** Fill in the Naming convention column of the Sources table, and `AUTHOR_REFS` in `Work/check_author_refs.py` with every name form the summaries will use for each author (add `<slug>/<file stem>` entries for interviewees). Test `python Work/check_author_refs.py <file>` and use it as `{AUTHOR_CHECK_COMMAND}` in prompts.
 - **Word count command.** Test `python Work/count_words.py <file>` from the project root, then use that tested invocation as `{WORD_COUNT_COMMAND}` in prompts, including the executable path if `python` is not on PATH.
 - Pick a pilot chapter complex enough to exercise extraction, splitting, and review: a chapter that will be split into parts is best.
 
@@ -231,7 +236,7 @@ If context adjustments change a part's evidence after drafting has started, rese
 
 ### 4. Pilot
 
-Take one representative chapter through extraction, summarizing, review, merging, and rendering. Assemble it alone by listing it in `PILOT_UNITS` in `Work/assemble.py`, and clear `PILOT_UNITS` afterwards. Evaluate fidelity (including the preservation audit in the review record), coverage, length, readability, extraction quality, and PDF layout, and adjust prompts and budgets before scaling up. Record the usage cost per task.
+Take one representative chapter through extraction, summarizing, review, merging, and rendering. Assemble it alone by listing it in `PILOT_UNITS` in `Work/assemble.py`, and clear `PILOT_UNITS` afterwards. Evaluate fidelity (including the preservation audit in the review record), coverage, length, readability (including `Work/check_author_refs.py`, and a read for pronoun chains it cannot count), extraction quality, and PDF layout, and adjust prompts and budgets before scaling up. Record the usage cost per task.
 
 Get the user's approval of the finished pilot unless they have already authorized you to continue without it. Record the decision.
 
@@ -254,8 +259,9 @@ Assign one fresh-context agent per part or chapter with the Reviewer prompt in `
 Build the queue with `Work/make_review_queue.py` and work through it in batches. After each batch:
 
 1. Run `Work/check_words.py` to flag summaries outside their budget range. Send each outlier to a reviewer, who either trims it without losing meaning or records a justified exception, such as restored source meaning. After an outlier edit, the reviewer checks the edited passages against the source, reruns the count, and updates the review record.
-2. Read each review record. Reject a record whose audits are missing or whose "Omissions kept" section lists a dropped contrast, hedge, attribution, or claim-evidence pair; those are material errors, not omissions.
-3. Set statuses with `python Work/set_status.py part accepted <slug> <unit_id> <part_index> ...`. While edits await verification, set previously accepted units back to `drafted`; a split chapter loses `accepted` status automatically when a part reopens.
+2. Run `python Work/check_author_refs.py` on the batch's summaries. Each paragraph it still flags must appear in the review record's author-naming line, with the other speaker that justifies the second reference. Send any other flagged paragraph back to the reviewer.
+3. Read each review record. Reject a record whose audits are missing or whose "Omissions kept" section lists a dropped contrast, hedge, attribution, or claim-evidence pair; those are material errors, not omissions.
+4. Set statuses with `python Work/set_status.py part accepted <slug> <unit_id> <part_index> ...`. While edits await verification, set previously accepted units back to `drafted`; a split chapter loses `accepted` status automatically when a part reopens.
 
 Review in this order:
 
@@ -277,7 +283,7 @@ By default, merge with `python Work/merge_chapters.py`. It concatenates each rea
 
 You can use a single merge agent instead when the combined reviewed part summaries are 32KB or less in UTF-8 bytes and the full task, including instructions and output, fits the model's limits with a safety margin. If a merge agent stalls, switch to the script and separate transition reviews. The merge agent reads the reviewed part summaries in order and does not read the chapter source.
 
-Either way, the merge keeps the parts in order, smooths abrupt transitions at part boundaries, and removes duplicated framing, without adding or dropping substantive claims. The total should stay within the chapter budget and tolerance. If accuracy requires a deviation, record it and the reason. Before the merged chapter is accepted, you or a fresh-context agent must check every edited transition against the original passages. Then check the merged file against the parts manifest: each part appears exactly once and in order, and the chapter is within budget or has a documented, justified deviation. Accept it with `python Work/set_status.py chapter accepted <slug> <unit_id>`.
+Either way, the merge keeps the parts in order, smooths abrupt transitions at part boundaries, and removes duplicated framing, without adding or dropping substantive claims. The total should stay within the chapter budget and tolerance. If accuracy requires a deviation, record it and the reason. Before the merged chapter is accepted, you or a fresh-context agent must check every edited transition against the original passages. Run `python Work/check_author_refs.py` on the merged file, because two parts that each open with the author's name can put two references in one paragraph at the seam. Then check the merged file against the parts manifest: each part appears exactly once and in order, and the chapter is within budget or has a documented, justified deviation. Accept it with `python Work/set_status.py chapter accepted <slug> <unit_id>`.
 
 After merging, `Work/Summaries/{slug}/parts/` is stale: later edits go to the canonical chapter summary only.
 
@@ -290,7 +296,7 @@ Reuse `Work/assemble.py` with updated `PARTS` and `INTRO` configuration. The scr
 - `## {Chapter Title}`, with optional `###` topic headings. Decide whether `###` headings are used for every source or none, so parts look consistent.
 - No inline citations, footnotes, or page references in final prose. Attribute claims in the prose where needed.
 
-Check the assembled document for missing or duplicate units, wrong order, heading errors, leftover internal markers, and leaked review notes. Compare the body word count with the aggregate target and record the overall ratio.
+Check the assembled document for missing or duplicate units, wrong order, heading errors, leftover internal markers, and leaked review notes. Run `python Work/check_author_refs.py` over every accepted summary. Compare the body word count with the aggregate target and record the overall ratio.
 
 Then run the whole-document review. Build chunks with `python Work/make_doc_chunks.py` and assign one fresh-context Whole-document reviewer (`prompts.md`) per chunk. It reads as someone unfamiliar with the sources, checking terminology, unexplained cross-chapter references, repetitive framing, and readability. It is report-only and must not fact-check: in one run, nearly every "error" these reviewers flagged was a claim the summaries faithfully reproduced from their sources. Chunks cross source boundaries on purpose; also inspect transitions across chunk boundaries yourself. Keep substantive differences between authors and any repetition that belongs to their arguments.
 
@@ -317,7 +323,7 @@ After remediation, update the Final words and deviation columns in the budget ta
 Each later pass has its own brief at the project root, copied from `passes/`, which is also its item list and status record. Agents read that brief (only through its "Agent prompt" section), `writing-rules.md`, and their assigned files. Common rules for every later pass:
 
 - Snapshot the affected canonical summaries with `python Work/snapshot_summaries.py <pass>` before the first dispatch. Never refresh or reuse an earlier snapshot.
-- Edit with targeted string replacements, never by regenerating a file.
+- Edit with targeted string replacements, never by regenerating a file. Never apply one replacement across many paragraphs or files (for example a pronoun or a name): that is how one run filled a summary with the author's name. Recast each paragraph under the naming rule, then run `python Work/check_author_refs.py`.
 - Agents fix only what the pass covers and log anything else under New reports. The next pass, if the user wants one, acts on that log.
 - The coordinator gates every batch: diff against the snapshot and revert unexplained hunks, check changed numbers, names, and quotations at the cited page, and commit the batch with its progress count.
 - Rebuild `Summary.md` and the PDF once at the end of each pass, inspect the changed pages, and add an entry to `Work/checks.md`.
@@ -348,6 +354,7 @@ Passes used in earlier runs, in order:
 - Each merged chapter contains every part exactly once, in order, and every transition the merge edited has been verified against the original passages.
 - Budgets are measured, the overall ratio is recorded, and meaningful deviations are explained. No summary was padded or stripped of essential content.
 - Whole-document consistency and completeness checks passed.
+- `Work/check_author_refs.py` flags no paragraph, apart from those whose review records justify a second reference to the author.
 - `Summary.md` and `Summary.pdf` match, and the PDF layout has been inspected.
 - `Work/checks.md` has an entry for every stage and pass.
 - Unresolved material limitations are disclosed, and no affected unit is marked accepted.
@@ -355,7 +362,7 @@ Passes used in earlier runs, in order:
 
 ## Status
 
-- [ ] Sources, scope, dependencies, and style instructions recorded
+- [ ] Sources, scope, dependencies, style instructions, and each author's naming convention recorded
 - [ ] Agent models recorded (default: Sonnet 5.5 at high effort for the summarizer, Opus 5.5 in every other role); output cap probed, or skip recorded under the default setup; usage limits recorded
 - [ ] Page mappings and chapter segmentation confirmed
 - [ ] Raw extraction preserved, uncertain repairs reviewed, and cleaned output validated
@@ -380,4 +387,4 @@ Decisions and gotchas:
 
 - {Decision, with date and whether the user made it.}
 
-Commands: `python Work/extract.py`; `python Work/split_parts.py`; `python Work/check_parts.py`; `python Work/make_review_queue.py`; `python Work/check_words.py`; `python Work/count_words.py <file>`; `python Work/set_status.py pending|part|chapter ...`; `python Work/merge_chapters.py [--dry-run]`; `python Work/make_transition_queue.py`; `python Work/assemble.py`; `python Work/make_doc_chunks.py`; `python Work/build_pdf.py`; `python Work/build_epub.py`; `python Work/snapshot_summaries.py <pass>`; `python Work/check_style_pass.py`; `python -m unittest discover -s Work/tests`.
+Commands: `python Work/extract.py`; `python Work/split_parts.py`; `python Work/check_parts.py`; `python Work/make_review_queue.py`; `python Work/check_words.py`; `python Work/count_words.py <file>`; `python Work/check_author_refs.py [<file> ...]`; `python Work/set_status.py pending|part|chapter ...`; `python Work/merge_chapters.py [--dry-run]`; `python Work/make_transition_queue.py`; `python Work/assemble.py`; `python Work/make_doc_chunks.py`; `python Work/build_pdf.py`; `python Work/build_epub.py`; `python Work/snapshot_summaries.py <pass>`; `python Work/check_style_pass.py`; `python -m unittest discover -s Work/tests`.

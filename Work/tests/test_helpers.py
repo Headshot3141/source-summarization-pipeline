@@ -1,5 +1,6 @@
 """Tests for the coordinator helpers: status updates, merging, queues,
-snapshots, and the style-pass checker. Run from the project root:
+snapshots, the style-pass checker, and the author-reference checker. Run
+from the project root:
 
     python -m unittest discover -s Work/tests
 """
@@ -13,6 +14,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import check_author_refs  # noqa: E402
 import check_style_pass  # noqa: E402
 import make_doc_chunks  # noqa: E402
 import make_transition_queue  # noqa: E402
@@ -240,6 +242,45 @@ class StylePassCheck(unittest.TestCase):
         problems = " | ".join(check_style_pass.check(self.OLD, new))
         for label in ("QUOTE CHANGED", "HEADINGS CHANGED", "PARAGRAPH COUNT"):
             self.assertIn(label, problems)
+
+
+class AuthorRefs(unittest.TestCase):
+    def setUp(self):
+        self.pattern = check_author_refs.ref_pattern(["Ada Penhale", "Penhale"])
+
+    def flags(self, text):
+        return check_author_refs.flagged_paragraphs(text, self.pattern)
+
+    def test_one_reference_per_paragraph_passes(self):
+        text = "## Title\n\nPenhale argues that X. The mill closed in 1937.\n\nThe author adds Y.\n"
+        self.assertEqual(self.flags(text), [])
+
+    def test_repeated_name_and_generic_form_are_flagged(self):
+        text = "## Title\n\nAda Penhale argues X. Penhale notes Y. The author adds Z.\n"
+        self.assertEqual(self.flags(text), [(3, ["Ada Penhale", "Penhale", "The author"])])
+
+    def test_quotations_block_quotes_and_headings_are_ignored(self):
+        text = '## Penhale and Penhale\n\nPenhale quotes a critic: "Penhale is wrong."\n\n> Penhale, Penhale.\n'
+        self.assertEqual(self.flags(text), [])
+
+    def test_slug_and_stem_from_paths(self):
+        slug_and_stem = check_author_refs.slug_and_stem
+        self.assertEqual(slug_and_stem("Work/Summaries/penhale-mills/03-ch-02.md"),
+                         ("penhale-mills", "03-ch-02"))
+        self.assertEqual(slug_and_stem("Work/Drafts/penhale-mills/parts/03-ch-02-part1-of-2.md"),
+                         ("penhale-mills", "03-ch-02"))
+        self.assertEqual(slug_and_stem("Work/Summaries_prestyle/penhale-mills/03-ch-02.md")[0],
+                         "penhale-mills")
+
+    def test_unit_entry_adds_to_source_entry(self):
+        saved = dict(check_author_refs.AUTHOR_REFS)
+        try:
+            check_author_refs.AUTHOR_REFS.update({"s": ["Penhale"], "s/03-interview": ["Marlow"]})
+            self.assertEqual(check_author_refs.ref_forms("s", "03-interview"), ["Penhale", "Marlow"])
+            self.assertEqual(check_author_refs.ref_forms("s", "04-ch-03"), ["Penhale"])
+        finally:
+            check_author_refs.AUTHOR_REFS.clear()
+            check_author_refs.AUTHOR_REFS.update(saved)
 
 
 if __name__ == "__main__":
