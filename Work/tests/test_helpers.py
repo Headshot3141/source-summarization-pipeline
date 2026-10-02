@@ -245,11 +245,12 @@ class StylePassCheck(unittest.TestCase):
 
 
 class AuthorRefs(unittest.TestCase):
-    def setUp(self):
-        self.pattern = check_author_refs.ref_pattern(["Ada Penhale", "Penhale"])
+    REFS = {"s": ["Ada Penhale", "Penhale"], "s/03-interview": ["Marlow"]}
 
-    def flags(self, text):
-        return check_author_refs.flagged_paragraphs(text, self.pattern)
+    def flags(self, text, stem="01-ch-01", exclude=()):
+        groups = check_author_refs.ref_groups("s", stem, self.REFS)
+        patterns = [check_author_refs.ref_pattern(g) for g in groups]
+        return check_author_refs.flagged_paragraphs(text, patterns, exclude)
 
     def test_one_reference_per_paragraph_passes(self):
         text = "## Title\n\nPenhale argues that X. The mill closed in 1937.\n\nThe author adds Y.\n"
@@ -272,15 +273,24 @@ class AuthorRefs(unittest.TestCase):
         self.assertEqual(slug_and_stem("Work/Summaries_prestyle/penhale-mills/03-ch-02.md")[0],
                          "penhale-mills")
 
-    def test_unit_entry_adds_to_source_entry(self):
-        saved = dict(check_author_refs.AUTHOR_REFS)
-        try:
-            check_author_refs.AUTHOR_REFS.update({"s": ["Penhale"], "s/03-interview": ["Marlow"]})
-            self.assertEqual(check_author_refs.ref_forms("s", "03-interview"), ["Penhale", "Marlow"])
-            self.assertEqual(check_author_refs.ref_forms("s", "04-ch-03"), ["Penhale"])
-        finally:
-            check_author_refs.AUTHOR_REFS.clear()
-            check_author_refs.AUTHOR_REFS.update(saved)
+    def test_each_person_is_counted_separately(self):
+        text = "Penhale asks X. Marlow answers Y.\n\nPenhale asks Z. Marlow says W. Marlow adds V.\n"
+        self.assertEqual(self.flags(text, "03-interview"), [(3, ["Marlow", "Marlow"])])
+
+    def test_unit_groups_and_generic_forms(self):
+        groups = check_author_refs.ref_groups("s", "03-interview", self.REFS)
+        self.assertEqual(groups, [["Ada Penhale", "Penhale", "the authors", "the author"], ["Marlow"]])
+        self.assertEqual(check_author_refs.ref_groups("t", "02-essay", {"t/02-essay": ["Hale"]}),
+                         [["Hale", "the authors", "the author"]])
+        self.assertEqual(check_author_refs.ref_groups("u", "01", {}), [["the authors", "the author"]])
+        two = {"u": ["Hale"], "u/04-interview": [["Ida Marlow", "Marlow"], ["Quint"]]}
+        self.assertEqual(check_author_refs.ref_groups("u", "04-interview", two),
+                         [["Hale", "the authors", "the author"], ["Ida Marlow", "Marlow"], ["Quint"]])
+
+    def test_not_author_phrases_are_removed_first(self):
+        text = "Penhale contrasts Tom Penhale's view with Y.\n"
+        self.assertEqual(self.flags(text), [(1, ["Penhale", "Penhale"])])
+        self.assertEqual(self.flags(text, exclude=["Tom Penhale"]), [])
 
 
 if __name__ == "__main__":

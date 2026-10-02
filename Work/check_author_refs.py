@@ -5,11 +5,14 @@ per paragraph: the paragraph's opening attribution covers its later
 sentences. In an earlier run the summaries of one book named the author
 about once every 80 words, mostly at the start of sentence after sentence.
 
-A reference is a name form listed in AUTHOR_REFS for the file's source, or a
-generic form ("the author", "the authors"), counted for every source. Text
-inside double quotation marks, block quotations ("> ") and headings is not
-counted. Pronouns are not counted, because they cannot be tied to the
-author mechanically; the rule still applies to them.
+A reference is a name form listed in Work/author_refs.json for the file's
+source or unit, or a generic form ("the author", "the authors"). Each person
+is counted separately, so an interview paragraph that names the interviewer
+once and the interviewee once passes. Text inside double quotation marks,
+block quotations ("> ") and headings is not counted, nor are phrases listed
+under "not_author" (another person who shares the author's surname).
+Pronouns are not counted, because they cannot be tied to a person
+mechanically; the rule still applies to them.
 
 A flagged paragraph is either rewritten or, where a second reference keeps
 another speaker's view apart from the author's, kept and justified in the
@@ -29,15 +32,24 @@ from pathlib import Path
 
 from common import ROOT
 
-# Fill in during Preflight: every form the summaries use for each source's
-# author, keyed by source slug. Add entries keyed "<slug>/<file stem>" for a
-# unit with its own main speaker, such as an interviewee; part suffixes
-# ("-part1-of-2") are ignored when matching. The longest forms match first,
-# so a full name and a surname in one entry are not double-counted.
-AUTHOR_REFS = {
-    # "surname-title": ["Ada Penhale", "Penhale"],
-    # "surname-title/03-interview": ["Marlow"],
-}
+CONFIG = ROOT / "Work" / "author_refs.json"
+# Fill in Work/author_refs.json during Preflight, for example:
+# {
+#   "refs": {
+#     "penhale-mills": ["Ada Penhale", "Penhale"],
+#     "penhale-mills/03-interview": ["Marlow"],
+#     "penhale-mills/04-interview": [["Ida Marlow", "Marlow"], ["Quint"]]
+#   },
+#   "not_author": {"penhale-mills": ["Tom Penhale"]}
+# }
+# "refs" maps a source slug to every form the summaries use for its author,
+# and "<slug>/<file stem>" to a unit's other main speakers (interviewees, or
+# an essay's author in an edited collection). A list of names is one person;
+# a list of lists is several people, each counted on their own. Part
+# suffixes ("-part1-of-2") are ignored when matching file stems. The longest
+# form matches first, so a full name and a surname are not double-counted.
+# The generic forms belong to the source's entry, or to the unit's entry when
+# the source has none.
 GENERIC = ["the authors", "the author"]
 
 MANIFEST = ROOT / "Work" / "manifest.json"
@@ -54,15 +66,34 @@ def slug_and_stem(path):
     return None, Path(path).stem
 
 
-def ref_forms(slug, stem):
-    forms = list(AUTHOR_REFS.get(slug, [])) + list(AUTHOR_REFS.get(f"{slug}/{stem}", []))
-    return sorted(set(forms), key=len, reverse=True)
+def load_config():
+    if not CONFIG.exists():
+        return {}, {}
+    data = json.loads(CONFIG.read_text(encoding="utf-8"))
+    return data.get("refs", {}), data.get("not_author", {})
+
+
+def ref_groups(slug, stem, refs):
+    """[[forms of one person], ...] for a file; generic forms join the first group."""
+    groups = []
+    for key in (slug, f"{slug}/{stem}"):
+        entry = refs.get(key) or []
+        if entry and all(isinstance(e, str) for e in entry):
+            entry = [entry]
+        groups += [list(person) for person in entry]
+    if not groups:
+        return [list(GENERIC)]
+    groups[0] += GENERIC
+    return groups
 
 
 def ref_pattern(forms):
-    names = [r"\b" + re.escape(f) + r"\b" for f in forms]
-    generic = [r"\b(?i:" + re.escape(g) + r")\b" for g in GENERIC]
-    return re.compile("|".join(names + generic))
+    """One pattern for a person's forms; the generic forms ignore case."""
+    alts = []
+    for form in sorted(set(forms), key=len, reverse=True):
+        body = re.escape(form)
+        alts.append(r"\b(?i:" + body + r")\b" if form in GENERIC else r"\b" + body + r"\b")
+    return re.compile("|".join(alts))
 
 
 def paragraphs(text):
@@ -75,27 +106,30 @@ def paragraphs(text):
         line += block.count("\n")
 
 
-def flagged_paragraphs(text, pattern):
-    """[(line, references found)] for paragraphs with more than one reference."""
+def flagged_paragraphs(text, patterns, exclude=()):
+    """[(line, references)] for paragraphs that refer to one person more than once."""
     found = []
     for line, para in paragraphs(text):
-        refs = pattern.findall(QUOTED.sub("", para))
-        if len(refs) > 1:
-            found.append((line, refs))
+        para = QUOTED.sub("", para)
+        for phrase in exclude:
+            para = para.replace(phrase, "")
+        over = [r for p in patterns for r in [p.findall(para)] if len(r) > 1]
+        if over:
+            found.append((line, [x for r in over for x in r]))
     return found
 
 
-def check_file(path):
+def check_file(path, refs, not_author):
     """Print flags for one file; return the number of flagged paragraphs."""
     slug, stem = slug_and_stem(path)
-    forms = ref_forms(slug, stem)
     label = Path(path).as_posix()
-    if not forms:
-        print(f"NOTE {label}: no AUTHOR_REFS entry for '{slug}', checking generic forms only")
+    if slug not in refs and f"{slug}/{stem}" not in refs:
+        print(f"NOTE {label}: no author_refs.json entry for '{slug}', checking generic forms only")
+    patterns = [ref_pattern(g) for g in ref_groups(slug, stem, refs)]
     text = Path(path).read_text(encoding="utf-8-sig")
-    found = flagged_paragraphs(text, ref_pattern(forms))
-    for line, refs in found:
-        print(f"FLAG {label}:{line}: {len(refs)} author references ({', '.join(refs)})")
+    found = flagged_paragraphs(text, patterns, not_author.get(slug, []))
+    for line, found_refs in found:
+        print(f"FLAG {label}:{line}: {len(found_refs)} references ({', '.join(found_refs)})")
     return len(found)
 
 
@@ -107,6 +141,7 @@ def manifest_paths():
 
 
 def main(argv):
+    refs, not_author = load_config()
     paths = [Path(a) for a in argv] or manifest_paths()
     total = missing = 0
     for path in paths:
@@ -114,7 +149,7 @@ def main(argv):
             print(f"MISSING {path}")
             missing += 1
             continue
-        total += check_file(path)
+        total += check_file(path, refs, not_author)
     print(f"check complete: {total} flagged paragraph(s)" + (f", {missing} missing file(s)" if missing else ""))
     return 1 if total or missing else 0
 
