@@ -19,6 +19,8 @@ In earlier runs, the most common errors made a summary more confident or more as
 - **(c) Attribution markers.** "According to X", "purportedly", "in X's view", and free-indirect framing. The narrative voice belongs to the author, so a claim the source attributes to someone else keeps its marker and never moves into it, and a view the author describes in order to reject stays marked as someone else's. The author's own explicit judgments ("was right to", "reasonably judged") must not be deleted. Resolve a pronoun to the actor the source means, never to the nearest noun. The author's own claims need no attribution (see "Naming the author").
 - **(d) Aggregation ban.** No total, average, ratio, or conversion may appear that the source does not itself state. Where the source prints components separately, keep them separate. Do not round.
 - **(e) Claim-evidence pairing.** If a claim is cut, its supporting evidence is cut with it; if evidence is kept, the claim it supports is kept. Evidence left without its claim reads as a non-sequitur even when every sentence is accurate.
+- **(f) Statements the author does not assert.** Not every sentence in the author's prose is the author's claim. Hypotheticals and thought experiments ("suppose", "imagine"), positions taken up for argument's sake ("one might say", "granted", "on this view"), views the author held earlier and dropped, other people's views given in free indirect style, irony, and questions all keep a frame showing they are not the author's settled position. The summary speaks in the author's voice, so an unframed statement reads as the author's assertion, and dropping the frame turns it into one. For irony, state what the source means, at its strength; if you cannot tell whether a passage is ironic, keep the source's framing and flag it. A question the source leaves open stays open ("Whether the closure was deliberate is left open"). Never answer it.
+- **(g) Conditions, negation, sequence, and reach.** A condition ("if", "unless", "only when", "provided that") stays attached to its claim. A negation keeps its scope: "not all" never becomes "none", and "not because A but because B" keeps both halves. Order words ("before", "after", "until", "by 1930", "at first", "eventually") keep the source's sequence, and two events are never set side by side in a way that implies an order or a cause the source does not give. Reach words keep their reach: "one of the largest" never becomes "the largest", and one example never becomes a general claim.
 
 Quotations match the source exactly. Do not add quotations the source does not have, and do not print a source quotation without quotation marks (a block quotation, below, uses `> ` instead).
 
@@ -44,9 +46,20 @@ In an earlier run, one book's summary named its author about once every 80 words
 - **Other voices get the marker.** In an interview collection or an edited volume, the narrative voice belongs to the person the AUTHOR line in your prompt names for the unit, such as the interviewee or the essay's author. Mark everyone else, interviewer included.
 - **Pronouns follow the convention set for each source** (the coordinator puts it in your prompt). Never infer gender from a name. When the source never genders its author, as is common in a book written in the first person, use no pronoun for the author. Never substitute the name for every pronoun.
 - **First-person passages** (memoir, an author's preface): where the author is the subject of the events, name the author once and carry on. Do not turn every "I" into the name.
-- **This does not weaken rule (c).** Attribution drift means moving someone else's claim into the narrative voice, where it reads as the author's, or deleting the marker that separates another speaker's view from the author's. A plain statement of the author's own view is not drift. When you restore a missing marker, attach it to the other speaker's view, not to the author's.
+- **A marker covers its own sentence,** and later sentences only when they carry it forward ("on this view", "in their account", reported speech). A paragraph that continues another speaker's view re-marks it in its first sentence, and every switch from another speaker's view back to the author's is marked.
+- **This does not weaken rules (c) and (f).** Attribution drift means moving someone else's claim into the narrative voice, where it reads as the author's, or deleting the marker that separates another speaker's view, a hypothetical, or a position taken up for argument's sake from the author's own view. A plain statement of the author's own view is not drift. When you restore a missing marker, attach it to the other speaker's view, not to the author's.
 
 The check script `Work/check_author_refs.py` flags paragraphs with more than one reference. It counts names and "the author", not pronouns, so read for pronoun chains too. A paragraph it passes can still carry a reference it does not need: remove an "X argues" that only prefaces the author's own view.
+
+## Shape of a summary (binding)
+
+A summary condenses its source in the source's own order. Think of it as two pages of the source becoming about one page of summary: the same content in the same sequence, denser, with minor material left out.
+
+- **Follow the source's order.** Summarize the source passage by passage, from start to finish. Do not regroup material by theme, move a conclusion to the front, or gather scattered points into one place.
+- **Add no structure the source lacks.** Do not invent an introduction, an overview, a "main ideas" or "key arguments" section, a list of takeaways, or a closing summary. A summary opens with what the source opens with, and has an introduction or a conclusion only where the source has one.
+- **Headings.** Use the `##` chapter heading your prompt gives. Use a `###` heading only where the source itself has a section heading at that point, with the source's wording. Never add a heading of your own.
+- **Make room by leaving things out, not by squeezing sentences.** When the budget is tight, drop whole minor points first: secondary examples, digressions, repetition, and asides. Do not strip the words a sentence needs to read clearly, such as articles, connecting words, and the nouns that pronouns refer to. A sentence that needs a second reading saves nothing.
+- **Connect points only as the source does.** Use the connecting word the source supports ("because", "so", "by contrast", "later"). Never add a causal or contrastive link the source does not make; where the source simply moves on, start a new paragraph.
 
 ## Style
 
@@ -56,7 +69,7 @@ The goal is prose that is clear and concise for a reader who has not read the so
 
 - Write in the third person. Never address the reader.
 - Do not use em dashes in summary prose. Text inside quotation marks and block quotations keeps its original punctuation, and extracted source text is never edited.
-- Write in paragraphs. Use a list only where the source passage is itself a list. Apart from the headings your prompt asks for, the only other Markdown in a summary is a reproduced block quotation (`> `).
+- Write in paragraphs. Use a list only where the source passage is itself a list. Apart from the headings described in "Shape of a summary", the only other Markdown in a summary is a reproduced block quotation (`> `).
 - State the author's views directly (see "Naming the author"). Clearly mark views that belong to others: quoted speakers, opponents, cited writers, and allegations. Do not present a quoted opponent's view as the author's.
 - Keep qualifications and distinctions. Do not turn association into causation, possibility into certainty, or a single example into a general claim.
 - Explain source-defined terms for a reader who has not read the original, using only the source.
@@ -68,12 +81,12 @@ The goal is prose that is clear and concise for a reader who has not read the so
 These patterns usually make a summary less clear. Use judgment: where the plain way to say something matches one of them, say it plainly.
 
 - **Filler and throat-clearing.** Phrases that announce a point instead of making it: "It is important to note that", "It is worth noting", "When it comes to", "At its core", "The reality is", "Here's why". Make the point.
-- **Meta commentary.** "This chapter explores", "The author then turns to", "As we will see". Report what the chapter says, not that it says something. A brief signpost is fine where the source's structure itself matters to the argument.
+- **Meta commentary.** "This chapter explores", "The author then turns to", "As we will see". Report what the chapter says, not that it says something. Keep a signpost the source itself gives.
 - **Empty emphasis.** Intensifiers that add no meaning: "really", "truly", "deeply", "fundamentally", "crucially", "importantly". Keep any word that expresses uncertainty, frequency, degree, or scope, as rule (b) requires, and keep the source's own evaluative words.
 - **Vague declaratives.** "The implications are significant", "The reasons are structural". Name the implication or the reason the source gives, or cut the sentence.
 - **Stock phrases and jargon.** "Plays a key role in", "serves as", "navigate challenges", "unpack", "landscape", "deep dive". Use the plain word, unless it is the source's own term.
 - **Formulaic contrasts and reveals.** "Not X, but Y", "The question isn't X. It's Y.", "It wasn't X. It wasn't Y. It was Z." State the point directly. When the source draws a real contrast, keep it (rule (a)) and state it plainly.
-- **Rhetorical setups and fragments.** Rhetorical questions, "Think about it:", staccato fragments for drama ("And Y. And Z."). Write complete declarative sentences.
+- **Rhetorical setups and fragments.** Rhetorical questions you add, "Think about it:", staccato fragments for drama ("And Y. And Z."). Write complete sentences. A question the source asks and leaves open is not a rhetorical setup: keep it open (rule (f)).
 - **Passive voice and vague actors.** Prefer active voice when the source names the actor. Use passive voice when the actor is unknown, unspecified, or irrelevant, and never invent an actor to avoid it. The same goes for abstractions doing human verbs ("the decision emerged"): name the person if the source does, otherwise keep the source's framing.
 - **Repeated conclusions.** A sentence that restates what the paragraph or chapter has just said ("In short", "Ultimately", "Taken together"). End on the last substantive point. Keep a conclusion the source itself draws.
 - **Slogans and pull-quote endings.** A punchy closing line such as "It was a system built on fear." Besides reading as filler, it often adds emphasis or a judgment the source does not make, which is a fidelity error. Close with the source's own point, at the source's strength.

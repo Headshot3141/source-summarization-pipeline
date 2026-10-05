@@ -65,8 +65,8 @@ Models and dispatch as set in plan.md, Agents.
 
 ## Summarization and Review
 
-| Batch | Units | Accepted | Blocked | Word-count outliers and disposition | Failures and retries |
-|---|---|---|---|---|---|
+| Batch | Units | Accepted | Blocked | Word-count outliers and disposition | Fidelity-check flags settled | Running ratio (document) | Failures and retries |
+|---|---|---|---|---|---|---|---|
 
 ## Scope Exceptions
 
@@ -81,14 +81,8 @@ Models and dispatch as set in plan.md, Agents.
 ## Assembly
 
 - Units assembled; missing, duplicate, or blocked units:
-- Introduction words; chapter-summary words; overall ratio against the aggregate target:
+- Introduction words; chapter-summary words; ratio per source and overall (target 0.50, maximum 0.55):
 - Structural checks from `Work/assemble.py`:
-
-## Whole-Document Review
-
-- Chunks and reviewers:
-- Findings triage, including rejected outside-knowledge fact-checks:
-- Edits made and their verification against the source:
 
 ## Independent Verification
 
@@ -98,15 +92,21 @@ Models and dispatch as set in plan.md, Agents.
 - Defect classes found, and the decision on remediation scope:
 - Remediation rounds and records:
 
+## Later Passes
+
+One entry per pass: brief file, scope, snapshot directory, records path, edits applied, checker results (including `check_words.py` ratio), reassembly result.
+
+## Whole-Document Review
+
+- Chunks and reviewers:
+- Findings triage, including rejected outside-knowledge fact-checks:
+- Edits made and their verification against the source:
+
 ## PDF Rendering and Inspection
 
 - Pages; blank or thin pages; U+FFFD count:
 - Every heading found in the PDF text:
 - No leftover `Work/`, `.md`, `<!--`, or page-reference strings:
 - Pages inspected visually (first, last, each part start, changed passages):
-
-## Later Passes
-
-One entry per pass: brief file, scope, snapshot directory, records path, edits applied, checker results, rebuild and PDF result.
 
 ## Open Issues

@@ -13,12 +13,16 @@ PARTS headings. Refuses to write anything if:
 
 When blocked units remain, the introduction gets a notice that the summary
 is partial, listing the omitted units and their limitations.
+
+After writing, prints the compression ratio (chapter summary words / retained
+source words) per source and for the document, against DOC_TARGET and
+DOC_MAX in Work/common.py.
 """
 import json
 import re
 import sys
 
-from common import ROOT
+from common import DOC_MAX, DOC_TARGET, ROOT
 from count_words import words_in_text
 
 SUMS = ROOT / "Work" / "Summaries"
@@ -73,6 +77,33 @@ def unit_titles():
         (c["source_slug"], c["unit_id"]): (c.get("part"), c.get("title") or c["unit_id"])
         for c in json.loads(PARTS_MANIFEST.read_text(encoding="utf-8"))
     }
+
+
+def source_words():
+    """{resolved chapter summary path: (slug, retained source words)} from the parts manifest."""
+    if not PARTS_MANIFEST.exists():
+        return {}
+    return {
+        (ROOT / c["summary"]).resolve(): (c["source_slug"], c["words"])
+        for c in json.loads(PARTS_MANIFEST.read_text(encoding="utf-8"))
+        if c.get("summary") and c.get("words")
+    }
+
+
+def print_ratios(counted):
+    """counted: [(slug, summary words, source words)]."""
+    totals = {}
+    for slug, words, src in counted:
+        t = totals.setdefault(slug, [0, 0])
+        t[0] += words
+        t[1] += src
+    for slug, (words, src) in totals.items():
+        print("ratio %s: %.3f (%d / %d words)" % (slug, words / src, words, src))
+    words, src = sum(t[0] for t in totals.values()), sum(t[1] for t in totals.values())
+    if src:
+        r = words / src
+        note = "OVER THE MAXIMUM" if r > DOC_MAX else "above target" if r > DOC_TARGET else "ok"
+        print("ratio document: %.3f (target %.2f, maximum %.2f): %s" % (r, DOC_TARGET, DOC_MAX, note))
 
 
 def accepted_paths(manifest, problems):
@@ -149,6 +180,7 @@ def main():
     if blocked and not problems:
         intro += "\n" + partial_notice(blocked, unit_titles())
     pieces, chapters, used = [intro], [], set()
+    sources, counted = source_words(), []
     for slug, heading in PARTS:
         folder = (SUMS / slug).resolve()
         files = [p for p in accepted if p.parent == folder]
@@ -161,6 +193,8 @@ def main():
             pieces.append(body)
             chapters.append(body)
             used.add(path)
+            if path in sources:
+                counted.append((sources[path][0], words_in_text(body), sources[path][1]))
             print("%-18s %s" % (slug, path.name))
     unmatched = [p.relative_to(ROOT).as_posix() for p in accepted if p not in used]
     if unmatched:
@@ -179,6 +213,7 @@ def main():
     body_words = sum(words_in_text(c) for c in chapters)
     print("wrote %s" % OUT.relative_to(ROOT).as_posix())
     print("introduction: %d words; chapter summaries: %d words; %d chapter(s)" % (intro_words, body_words, len(chapters)))
+    print_ratios(counted)
     if blocked:
         print("PARTIAL: %d blocked unit(s) omitted and listed in the introduction" % len(blocked))
 

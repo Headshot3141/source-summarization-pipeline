@@ -46,7 +46,7 @@ The project reproduces each source as printed. Many reports are written from gen
 
 ## When to restore omitted content
 
-A summary omits most of its source by design. Qualifiers are different from omissions.
+A summary leaves out about half of its source by design. Qualifiers are different from omissions.
 
 - Dropped qualifiers, lost precision, altered claims, attribution, quotations, and spelling: restore or correct. The summary currently states something the source does not.
 - Omitted content: restore only if leaving it out makes a sentence the summary does contain misleading or unsupported, for example the source's qualification of a claim the summary makes, or its explanation of an outcome the summary reports. If the surviving statements stand accurately on their own, the disposition is `declined`, with the reason. Do not restore content only because it is interesting.
@@ -73,7 +73,7 @@ These are absolute. An edit that breaks one is a defect, however good the result
 3. **The preservation rule in `writing-rules.md` is binding** and outranks everything except fidelity. Keep a reversal attached to the right scope. Match hedges to the source's strength. If the source's own figures do not add up, the disposition is `faithful`. Never compute a figure.
 4. **Quotations** match the source exactly, including capitals; change one only to match, and record the before and after. Where the source uses single quotation marks and the summaries use double, keep the summaries' convention. Unquoted first-person source speech is either quoted exactly or recast as indirect speech.
 5. **Structure.** Keep `##` and `###` heading text exactly and paragraph breaks where they are. A sentence may move only within its paragraph, and only where an item reports that its order departs from the source.
-6. **Word count is not a constraint.** Restorations run longer.
+6. **Length.** Restorations run longer, and that is expected. The coordinator keeps the document at or under 0.55 of its source with `check_words.py`.
 7. **Style.** New or rewritten text follows `writing-rules.md`. Style never overrides the rules above.
 8. **Spelling.** Names follow the source's spelling. A spelling inconsistent within one summary is fixed to the source's spelling for that chapter; if the source itself is inconsistent, the disposition is `faithful`. Where the source spelling is an evident extraction artifact, reproduce the author's form as far as the extraction shows it, and say so in the record.
 9. **Targeted string replacements only.** Do not regenerate or rewrite the file.
@@ -187,10 +187,10 @@ For an agent handling several short chapters (group them so each agent has about
 2. Search the chapter source for every added phrase. Agents in earlier runs added words the source lacks ("historians", "onward"), dropped a phrase while restoring a clause, stretched a source phrase over more referents than it covers, and computed figures. Where an agent supplied a connecting verb, confirm it adds no claim.
 3. For every changed number, date, name, or quotation, open the source at the cited page marker and confirm the new text matches.
 4. Spot-check `faithful`, `declined`, and `not a defect` dispositions against the source, especially items reported as likely errors.
-5. Run `{AUTHOR_CHECK_COMMAND}` on the batch's files. Any paragraph it still flags must appear in the record's Author naming section with the other speaker that justifies it.
+5. Run `python Work/check_fidelity.py` on the batch's chapters and `python Work/check_words.py`. A remaining fidelity flag in an edited passage is checked against the source; the document ratio stays at or under 0.55. Run `{AUTHOR_CHECK_COMMAND}` on the batch's files. Any paragraph it still flags must appear in the record's Author naming section with the other speaker that justifies it.
 6. Update each item's Status cell (for example `restored (a, c); declined (b)`), log new reports, and commit the batch as "{Pass name}: {source} ch-NN to ch-NN (N of TOTAL)".
 
-**Final steps.** `python Work/assemble.py`, `python Work/build_pdf.py`. Locate the changed passages in the PDF (for example with a PyMuPDF text search), render those pages, and inspect them for layout damage. Record the pass in `Work/checks.md`, and decide with the user whether the New reports warrant another pass.
+**Final steps.** `python Work/assemble.py` and `python Work/check_words.py`. The PDF is rendered and inspected once, after the last pass (plan.md Step 12). Record the pass in `Work/checks.md`, and decide with the user whether the New reports warrant another pass.
 
 ## Status
 

@@ -4,17 +4,20 @@ Each `# ` heading (the introduction and each source part) becomes a section
 page, and each `## ` chapter becomes its own EPUB page listed under its part
 in the table of contents. The title comes from TITLE in Work/build_pdf.py.
 
+Markdown is converted with Work/build_pdf.py's markdown_to_html, so the
+text appears exactly as written (see that module's docstring for the rules).
+
 Requires ebooklib (see requirements.txt). Run from the project root:
 
     python Work/build_epub.py
 """
+import html
 import re
 import uuid
 
-import markdown
 from ebooklib import epub
 
-from build_pdf import TITLE
+from build_pdf import TITLE, markdown_to_html
 from common import ROOT
 
 MD = ROOT / "Summary.md"
@@ -34,7 +37,7 @@ p { margin: 0 0 0.65em; text-align: justify; }
 
 
 def to_html(text):
-    return markdown.markdown(text, extensions=["extra", "sane_lists"])
+    return markdown_to_html(text)
 
 
 def split_book(text):
@@ -75,7 +78,7 @@ def main():
     chapter_count = 0
     for p_idx, (p_title, preamble, chapters) in enumerate(split_book(text)):
         head = page(book, css, "part%02d.xhtml" % p_idx, p_title,
-                    "<h1>%s</h1>\n%s" % (p_title, to_html(preamble)))
+                    "<h1>%s</h1>\n%s" % (html.escape(p_title, quote=False), to_html(preamble)))
         spine.append(head)
         links = []
         for c_idx, (c_title, body) in enumerate(chapters, 1):

@@ -23,6 +23,7 @@ import re
 import sys
 
 from common import (
+    DRAFT_RATIO,
     HARD_CAP,
     OWNED_END,
     OWNED_START,
@@ -32,6 +33,7 @@ from common import (
     ends_sentence,
     is_heading,
     rel,
+    review_ceiling,
     strip_comments,
     yaml_value,
 )
@@ -48,7 +50,12 @@ PREFER_HEADING_AT = 20_000
 MIN_REMAINING = 6_000
 FILE_OVERHEAD = 1_500  # room for frontmatter, heading, and markers
 
+# Each part after the first opens with the end of the previous part, so its
+# summarizer can follow references back into it: at least OVERLAP_BLOCKS
+# paragraphs, extended backwards until they hold OVERLAP_MIN_WORDS words.
+# Overlap that would push a part over the hard cap is dropped, oldest first.
 OVERLAP_BLOCKS = 1
+OVERLAP_MIN_WORDS = 250
 OVERLAP_START = "<!-- overlap context from the end of the previous part: use for reference only, do not re-summarize it, excluded from word_count and word_budget -->"
 OVERLAP_END = "<!-- end overlap context -->"
 
@@ -120,7 +127,9 @@ def parse_plan_budgets():
         if key in budgets:
             errors.append(f"plan.md line {n}: duplicate budget row for {slug}/{unit}")
             continue
-        budgets[key] = {"target": int(target.replace(",", "")), "title": title, "plan_part": current_part}
+        reason = cells[7] if len(cells) >= 8 else ""
+        budgets[key] = {"target": int(target.replace(",", "")), "title": title, "plan_part": current_part,
+                        "reason": reason}
     return budgets, errors
 
 
@@ -242,11 +251,14 @@ def part_pages(body, a, b, fallback):
     return "%d-%d" % (first, last)
 
 
-def overlap_blocks(body, prev_span, count):
+def overlap_blocks(body, prev_span, count, min_words=0):
     if count <= 0:
         return []
     spans = [(a, b) for a, b in paragraph_units(body) if a >= prev_span[0] and b <= prev_span[1]]
-    return [body[a:b].strip() for a, b in spans[-count:]]
+    take = min(count, len(spans))
+    while take < len(spans) and sum(words_in_text(body[a:b]) for a, b in spans[-take:]) < min_words:
+        take += 1
+    return [body[a:b].strip() for a, b in spans[-take:]]
 
 
 def context_block(owner, text):
@@ -375,11 +387,15 @@ def main():
         slug, unit = ch["key"]
         budget = budgets[ch["key"]]["target"]
         stem = path.stem
+        expected = round(ch["words"] * DRAFT_RATIO)
         parts_dir = path.parent / "parts"
         summary = f"Work/Summaries/{slug}/{stem}.md"
         notes = []
         if meta.get("word_count") != ch["words"]:
             notes.append(f"frontmatter word_count {meta.get('word_count')} differs from measured {ch['words']}")
+        if abs(budget - expected) > max(5, 0.05 * expected) and not budgets[ch["key"]]["reason"]:
+            notes.append(f"Target {budget} differs from {DRAFT_RATIO} x {ch['words']} source words ({expected}) "
+                         f"with no reason for deviation recorded in plan.md")
 
         written = set()
         units = []
@@ -390,7 +406,8 @@ def main():
                 "draft": f"Work/Drafts/{slug}/{stem}.md",
                 "summary": summary,
                 "record": f"Work/Reviews/{slug}/{stem}.md",
-                "words": ch["words"], "budget": budget, "bytes": ch["bytes"],
+                "words": ch["words"], "budget": budget,
+                "ceiling": review_ceiling(budget, ch["words"]), "bytes": ch["bytes"],
                 "sha": ch["sha"], "status": "pending", "context_from": [],
             })
         else:
@@ -420,8 +437,8 @@ def main():
                 ]
                 heading = f"# {meta.get('title') or unit} (Part {k} of {m})"
                 owned = body[a:b]
-                want = OVERLAP_BLOCKS if k > 1 else 0
-                overlap = overlap_blocks(body, spans[k - 2], want) if k > 1 else []
+                overlap = overlap_blocks(body, spans[k - 2], OVERLAP_BLOCKS, OVERLAP_MIN_WORDS) if k > 1 else []
+                want = len(overlap)
                 ckey = (slug, unit, k, m)
                 before, after = place_context(contexts.get(ckey, []), body, spans, k, unit, notes)
                 if ckey in contexts:
@@ -446,7 +463,7 @@ def main():
                     "draft": f"Work/Drafts/{slug}/parts/{pname}",
                     "summary": f"Work/Summaries/{slug}/parts/{pname}",
                     "record": f"Work/Reviews/{slug}/parts/{pname}",
-                    "words": w, "budget": share, "bytes": len(data),
+                    "words": w, "budget": share, "ceiling": review_ceiling(share, w), "bytes": len(data),
                     "sha": sha(data), "status": status,
                     "context_from": [o for o, _ in before + after],
                 })
@@ -489,16 +506,22 @@ def main():
             "summary": summary,
             "words": ch["words"],
             "budget": budget,
+            "ceiling": review_ceiling(budget, ch["words"]),
             "part_count": len(units),
             "status": status,
             "blocked_reason": SCRIPT_BLOCK_REASON if script_blocked else None,
             "parts": units,
         })
+        # The hash of the last merged chapter summary, kept so merge_chapters.py
+        # never overwrites a chapter edited after its merge.
+        if prev and prev.get("merged_sha"):
+            parts_manifest[-1]["merged_sha"] = prev["merged_sha"]
         chapter_manifest.append({"source_slug": slug, "unit_id": unit, "path": summary, "status": status})
         maxb = max(u["bytes"] for u in units)
         report.append(
             f"{slug}/{unit} ({path.name}): {len(units)} part(s), {ch['words']} words, "
-            f"budget {budget}, largest file {maxb} bytes, status {status}"
+            f"budget {budget} (ceiling {review_ceiling(budget, ch['words'])}), largest file {maxb} bytes, "
+            f"status {status}"
         )
         report.extend("  !! " + n for n in notes)
 

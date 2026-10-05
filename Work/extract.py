@@ -1,3 +1,4 @@
+import html
 import os
 import re
 import sys
@@ -153,6 +154,64 @@ SOURCES_CONFIG = [
     #          "printed_pages": "1-20", "first_line": "", "notes": 1},
     #     ],
     # },
+    # Docling Markdown source: a .md file docling exported from a PDF (see
+    # the Docling Markdown section below). The export is the source; the PDF
+    # is for checking. A chapter starts at a docling heading line ("## 3 The
+    # Long War"): by default one whose text, normalized for case, spacing,
+    # and punctuation, is the title, the number and title, or a title_alt;
+    # a bare number heading ("## 3", "## Chapter 3") just above it is taken
+    # in. "heading" matches other heading text instead, and "first_line" (a
+    # line prefix) starts at a body line, after the heading. "occurrence"
+    # picks a later match when a table of contents repeats a heading. A
+    # chapter ends at the next chapter's start, or before the first line
+    # after its start beginning with stop_line; text after a stop_line and
+    # before the next start (part titles, back matter) is left out. A
+    # chapter that starts at first_line needs stop_line on the chapter
+    # before it, or that chapter keeps the heading. Chapters never set
+    # start/end pages.
+    # page_break is docling's page_break_placeholder line: each one starts
+    # the next PDF page, counted from first_page. skip_pages lists PDF pages
+    # the export has no break for (blank or image-only pages), and last_page,
+    # if set, is checked against the count. With no placeholders in the
+    # file there are no page markers and pdf_pages is empty.
+    # header_patterns (regexes searched in each paragraph and heading) and
+    # junk_lines (whole normalized lines) drop running heads that leaked
+    # into the text. They apply anywhere in the file, so make them specific.
+    # footnote_pattern (a regex matched at the start of a paragraph) marks
+    # footnotes: they move to a notes block at the chapter end, and a
+    # paragraph they interrupted is rejoined. With page breaks, only
+    # footnotes at the end of a page move unless footnotes_at_page_end is
+    # False. not_headings lists heading-line prefixes that are body text.
+    # strip_emphasis removes *italic* and **bold** markers (default: kept).
+    # hyphen_spaces: True rejoins "popu- lation", a line-end hyphen kept
+    # with a space, by the hyphenation rules; False keeps and logs each.
+    # line_fixes, char_map, hyphenates, block_quotes, and block_quote_fixes
+    # work as for paged TXT.
+    # {
+    #     "slug": "",
+    #     "md": "",
+    #     "title": "",
+    #     "part": 4,
+    #     "page_break": "<!-- page break -->",
+    #     "first_page": 1,
+    #     "skip_pages": [],
+    #     "last_page": None,
+    #     "header_patterns": [r"^HARBOR TOWN HISTORY$"],
+    #     "junk_lines": [],
+    #     "footnote_pattern": r"^\d{1,3}\s",
+    #     "footnotes_at_page_end": True,
+    #     "not_headings": [],
+    #     "strip_emphasis": False,
+    #     "hyphen_spaces": False,
+    #     "line_fixes": {},
+    #     "block_quotes": True,
+    #     "block_quote_fixes": {"join": [], "start": [], "end": [], "add": [], "remove": []},
+    #     "chapters": [
+    #         {"unit_id": "ch-01", "slug": "", "title": "", "num": 1, "printed_pages": "1-20"},
+    #         {"unit_id": "ch-02", "slug": "", "title": "", "num": 2, "printed_pages": "21-40",
+    #          "heading": "", "occurrence": 1, "first_line": "", "stop_line": ""},
+    #     ],
+    # },
 ]
 
 
@@ -183,6 +242,30 @@ class RepairLog:
       blockquote-nocite, -multi,          block quotation marked on weaker evidence; review each
       blockquote-no-leadin, -epigraph
       blockquote-fixed                    marked or unmarked by the source's block_quote_fixes
+    Docling Markdown sources also log (page is a PDF page, or "line N" of the
+    .md file when the export has no page-break placeholders):
+      no-page-markers                     the file has no page_break placeholders (once)
+      page-count-mismatch                 page count differs from last_page
+      chapter-start-ambiguous             the chapter's start heading recurs inside it
+      chapter-start-not-heading           start matched a paragraph, not a heading line
+      chapter-end-of-file                 last chapter has no stop_line and runs to the end
+      section-heading                     docling heading turned into a plain heading line
+      heading-demoted                     heading line listed in not_headings, kept as text
+      image-placeholder, formula-placeholder, comment-dropped
+                                          placeholder dropped; check the page for content
+      code-block                          fenced block kept verbatim
+      furniture-dropped                   running head matched header_patterns or junk_lines
+      furniture-candidate                 bare page-number paragraph kept
+      footnote-moved                      moved to the notes block at the chapter end
+      footnote-candidate                  looks like a footnote but stayed in the body
+      footnote-open-ended                 moved footnote may continue on the next page
+      page-break-joined, -midword,        paragraph rejoined across a page break or
+      page-break-joined-uncertain         removed footnotes, running head, or placeholder
+      page-break-unjoined                 open-ended paragraph not joined to the next
+      hyphen-space-kept                   "popu- lation": hyphen and space kept as exported
+      blockquote-source                   paragraph the export already marked "> "
+      emphasis-kept, emphasis-stripped    *italic* / **bold** spans in the chapter
+      replacement-char, glyph-placeholder U+FFFD or docling "GLYPH<...>" left in the text
     """
 
     COLUMNS = ("unit_id", "pdf_page", "kind", "detail")
@@ -986,8 +1069,8 @@ NOTES_LABEL = "Notes to this chapter (printed at the back of the book):"
 
 
 def _prefix_quote(para):
-    """Put the block-quote prefix before a paragraph's text, after a leading page marker."""
-    m = re.match(r"(<!-- page \d+ -->\n)?", para)
+    """Put the block-quote prefix before a paragraph's text, after leading marker lines."""
+    m = re.match(r"(?:<!--[^\n]*?-->\n)*", para)
     return para[:m.end()] + BLOCK_QUOTE_PREFIX + para[m.end():]
 
 
@@ -1125,6 +1208,8 @@ def check_block_quote_fixes(cfg, folder):
     fixes = cfg.get("block_quote_fixes", {})
     bodies = []
     for name in sorted(os.listdir(folder)):
+        if not name.endswith(".md") or not os.path.isfile(os.path.join(folder, name)):
+            continue  # skip parts/ and anything that is not a chapter file
         with open(os.path.join(folder, name), encoding="utf-8") as f:
             bodies.append(f.read())
     paras = [strip_comments(p).strip().removeprefix(BLOCK_QUOTE_PREFIX) for b in bodies for p in b.split("\n\n")]
@@ -1275,6 +1360,483 @@ def join_pages(pages, ev=NO_EVIDENCE, log=None):
     return out
 
 
+# ---------------------------------------------------------------- Docling Markdown
+#
+# A .md file docling exported from a PDF. Docling writes one block per layout
+# item, separated by blank lines: section headers as "## " lines (the title
+# sometimes "# "), paragraphs as single lines, tables as GitHub pipe tables,
+# list items as "- " lines, and pictures and formulas as placeholder comments.
+# Text is HTML-escaped (&amp; &lt; &gt;) and Markdown-escaped (\_). Running
+# heads and page numbers are normally left out, and there are no page numbers
+# unless the export used a page-break placeholder. Footnotes are ordinary
+# paragraphs in reading order, usually at the end of their page, and a
+# paragraph that runs across a page can come out as two.
+
+DEFAULT_PAGE_BREAK = "<!-- page break -->"
+MD_PLACEHOLDERS = {"<!-- image -->": "image", "<!-- formula-not-decoded -->": "formula"}
+MD_HEADING = re.compile(r"^#{1,6}\s+(.*?)(?:\s+#+)?$")
+MD_IMAGE_LINK = re.compile(r"^!\[[^\]]*\]\([^)]*\)$")
+MD_COMMENT = re.compile(r"^<!--.*-->$")
+MD_TABLE_ROW = re.compile(r"^\|.*\|$")
+MD_LIST_ITEM = re.compile(r"^(?:[-*+]|\d{1,3}[.)])\s+\S")
+# One pass, so an escaped entity (&amp;lt;) or backslash is unescaped once.
+MD_UNESCAPE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!|<>~])|&(?:#\d+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);")
+MD_EMPHASIS = re.compile(r"(?<![\\*\w])(\*\*?)(?=\S)(.+?)(?<=[^\s\\])\1(?![*\w])")
+GLYPH = re.compile(r"GLYPH<[^>]*>")
+# A paragraph that looks like a footnote when no footnote_pattern is set.
+MD_FOOTNOTE_HINT = re.compile(r"^(?:\d{1,3}(?!\d)|[¹²³⁰-⁹]+|[*†‡])\s*[A-Z“‘\"'(]")
+# Tables, list items, and numbered items never start a block quotation.
+MD_ITEM_START = re.compile(r"^(?:\||[-*+]\s|\d{1,3}[.)]\s)")
+# "pre- and post-war": a suspended hyphen, not a line break.
+HYPHEN_SPACE = re.compile(r"(?<![\w-])([A-Za-z]+)- ([a-z]+)")
+SUSPENDED_NEXT = {"and", "or", "nor", "to", "und"}
+MD_TEXT_KINDS = ("heading", "para", "quote", "list", "table", "code")
+FOOTNOTES_LABEL = "Notes to this chapter (printed as footnotes in the source):"
+
+
+def md_unescape(text, table=False):
+    """Undo docling's HTML entities and Markdown backslash escapes.
+
+    In a table row an escaped pipe stays escaped, so the row keeps its cells.
+    """
+    def sub(m):
+        if m.group(1) is not None:
+            return m.group(0) if table and m.group(1) == "|" else m.group(1)
+        ch = html.unescape(m.group(0))
+        return m.group(0) if table and ch == "|" else ch
+    return MD_UNESCAPE.sub(sub, text)
+
+
+def md_parse(lines, page_break=DEFAULT_PAGE_BREAK):
+    """Group a docling export's (line number, line) pairs into blocks.
+
+    Returns dicts with kind (heading, para, quote, list, table, code, page,
+    image, formula, comment), lines, and line (number of the first line).
+    Blank lines end a block. A heading, placeholder, or comment line is a
+    block of its own; consecutive table rows, quote lines, list items (with
+    indented continuation lines), or text lines make one block; a fenced
+    code block is kept whole.
+    """
+    blocks, cur = [], None
+
+    def flush():
+        nonlocal cur
+        if cur is not None:
+            blocks.append(cur)
+        cur = None
+
+    for no, ln in lines:
+        s = ln.strip()
+        if cur is not None and cur["kind"] == "code":
+            cur["lines"].append(ln)
+            if s.startswith("```"):
+                flush()
+            continue
+        if s.startswith("```"):
+            flush()
+            cur = {"kind": "code", "lines": [ln], "line": no}
+            continue
+        if not s:
+            flush()
+            continue
+        single = None
+        if page_break and s == page_break:
+            single = "page"
+        elif s in MD_PLACEHOLDERS:
+            single = MD_PLACEHOLDERS[s]
+        elif MD_IMAGE_LINK.match(s):
+            single = "image"
+        elif MD_COMMENT.match(s):
+            single = "comment"
+        elif MD_HEADING.match(s):
+            single = "heading"
+        if single:
+            flush()
+            blocks.append({"kind": single, "lines": [s], "line": no})
+            continue
+        if MD_TABLE_ROW.match(s):
+            kind = "table"
+        elif s.startswith(">"):
+            kind = "quote"
+        elif MD_LIST_ITEM.match(s) or (cur is not None and cur["kind"] == "list" and ln[:1].isspace()):
+            kind = "list"
+        else:
+            kind = "para"
+        if cur is None or cur["kind"] != kind:
+            flush()
+            cur = {"kind": kind, "lines": [], "line": no}
+        cur["lines"].append(ln if kind == "list" else s)
+    flush()
+    return blocks
+
+
+def md_hyphen_spaces(text, cfg, ev, log=None, where=None):
+    """Handle "popu- lation": a line-end hyphen docling kept, followed by a space.
+
+    With the source's hyphen_spaces setting the fragments are joined by the
+    hyphenation rules (hyphen-removed or hyphen-kept is logged); otherwise
+    the text is kept as exported and each case is logged. A suspended
+    hyphen ("pre- and post-war") is left alone.
+    """
+    def fix(m):
+        stem, first = m.group(1), m.group(2)
+        if first in SUSPENDED_NEXT:
+            return m.group(0)
+        if not cfg.get("hyphen_spaces"):
+            _log(log, where, "hyphen-space-kept", m.group(0))
+            return m.group(0)
+        sep, basis = hyphen_decision(stem, first, ev)
+        word = stem + sep + first
+        _log(log, where, "hyphen-kept" if sep else "hyphen-removed",
+             "%s- %s -> %s (%s; space after hyphen)" % (stem, first, word, basis))
+        return word
+    return HYPHEN_SPACE.sub(fix, text)
+
+
+def md_block_texts(block, cfg, ev=NO_EVIDENCE, log=None, where=None, stats=None):
+    """Return the chapter-text paragraph(s) for one docling block.
+
+    A heading becomes its plain text (no "#" marks). A paragraph's lines are
+    unescaped and joined. A quote block becomes one "> " paragraph per
+    quoted paragraph. Table, list, and code blocks keep their lines; table
+    rows are unescaped but not reflowed. U+FFFD and docling GLYPH<...>
+    placeholders are logged. stats counts emphasis spans kept or stripped.
+    """
+    stats = Counter() if stats is None else stats
+    kind, lines = block["kind"], block["lines"]
+
+    def inline(s):
+        if cfg.get("strip_emphasis"):
+            s, n = MD_EMPHASIS.subn(r"\2", s)
+            stats["stripped"] += n
+        else:
+            stats["kept"] += len(MD_EMPHASIS.findall(s))
+        return md_unescape(s)
+
+    def prose(group):
+        return md_hyphen_spaces(join_lines([inline(s) for s in group], ev, log, where), cfg, ev, log, where)
+
+    if kind == "heading":
+        out = [inline(MD_HEADING.match(lines[0]).group(1)).strip()]
+    elif kind == "table":
+        out = ["\n".join(md_unescape(s.strip(), table=True) for s in lines)]
+    elif kind == "code":
+        out = ["\n".join(lines)]
+    elif kind == "list":
+        out = ["\n".join(md_hyphen_spaces(inline(s), cfg, ev, log, where) for s in lines)]
+    elif kind == "quote":
+        groups, cur = [], []
+        for s in lines:
+            s = re.sub(r"^(?:>\s?)+", "", s)
+            if s.strip():
+                cur.append(s)
+            elif cur:
+                groups.append(cur)
+                cur = []
+        if cur:
+            groups.append(cur)
+        out = [BLOCK_QUOTE_PREFIX + prose(g) for g in groups]
+    elif kind == "para":
+        out = [prose(lines)]
+    else:
+        out = [lines[0]]
+    out = [t for t in out if t.strip()]
+    for t in out:
+        if "�" in t:
+            _log(log, where, "replacement-char", t[:80])
+        for m in GLYPH.finditer(t):
+            _log(log, where, "glyph-placeholder", m.group(0))
+    return out
+
+
+class MdSource:
+    """A docling Markdown source: parsed once, with each chapter's block range."""
+
+    def __init__(self, cfg, log=None):
+        self.cfg, self.log = cfg, log
+        with open(os.path.join(SOURCES, cfg["md"]), encoding="utf-8-sig") as f:
+            text = f.read()
+        numbered = []
+        for no, ln in enumerate(text.splitlines(), 1):
+            for fixed in apply_line_fixes([clean_txt_line(ln, cfg)], cfg, log, "line %d" % no):
+                numbered.append((no, fixed))
+        self.blocks = md_parse(numbered, cfg.get("page_break", DEFAULT_PAGE_BREAK))
+        self.paged = any(b["kind"] == "page" for b in self.blocks)
+        self._number_pages()
+        for b in self.blocks:
+            if b["kind"] != "heading":
+                continue
+            s = MD_HEADING.match(b["lines"][0]).group(1)
+            if any(s.startswith(x) or md_unescape(s).startswith(x) for x in cfg.get("not_headings", [])):
+                _log(log, self.where(b), "heading-demoted", s)
+                b["kind"], b["lines"] = "para", [s]
+        counts = Counter(w.lower() for _, ln in numbered for w in WORD.findall(md_unescape(ln)))
+        self.ev = DocEvidence(counts)
+        self.ev.hyphenates = cfg.get("hyphenates", True)
+        self.ev.counts = counts
+        self._plain = {}
+        self.bounds = self._find_bounds(cfg["chapters"])
+
+    def _number_pages(self):
+        cfg = self.cfg
+        skip = set(cfg.get("skip_pages", []))
+        page = cfg.get("first_page", 1)
+        while page in skip:
+            page += 1
+        for b in self.blocks:
+            if b["kind"] == "page":
+                page += 1
+                while page in skip:
+                    page += 1
+            b["page"] = page if self.paged else None
+        if not self.paged:
+            _log(self.log, None, "no-page-markers", "%s: no %r placeholder lines; chapters get no page markers"
+                 % (cfg["md"], cfg.get("page_break", DEFAULT_PAGE_BREAK)))
+        elif cfg.get("last_page") not in (None, page):
+            _log(self.log, None, "page-count-mismatch", "page breaks count to page %d, last_page is %d"
+                 % (page, cfg["last_page"]))
+
+    def where(self, block):
+        return block["page"] if self.paged else "line %d" % block["line"]
+
+    def plain(self, i):
+        """Text of block i for matching chapter bounds (headings and paragraphs only)."""
+        if i not in self._plain:
+            b = self.blocks[i]
+            texts = md_block_texts(b, self.cfg, self.ev) if b["kind"] in ("heading", "para") else []
+            self._plain[i] = texts[0] if texts else ""
+        return self._plain[i]
+
+    def _starts(self, i, prefix):
+        b = self.blocks[i]
+        return b["kind"] in MD_TEXT_KINDS and (b["lines"][0].strip().startswith(prefix) or self.plain(i).startswith(prefix))
+
+    def _is_form(self, i, forms):
+        pn = headnorm(self.plain(i))
+        return bool(pn) and (pn in forms or re.sub(r"(?<=[a-z])\d{1,3}$", "", pn) in forms)
+
+    def _find_start(self, ch, frm):
+        n = len(self.blocks)
+        if ch.get("first_line"):
+            what = "first_line %r" % ch["first_line"]
+            hits = [i for i in range(frm, n) if self._starts(i, ch["first_line"])]
+        else:
+            nums = heading_forms("", ch.get("num"))
+            if ch.get("heading"):
+                what, forms = "heading %r" % ch["heading"], {headnorm(ch["heading"])}
+            else:
+                what = "heading %r" % ch["title"]
+                full = heading_forms(ch["title"], ch.get("num"), ch.get("title_alt"))
+                # A bare number heading starts a chapter only just above its title.
+                forms = (full - nums) or full
+            hits = [i for i in range(frm, n) if self.blocks[i]["kind"] == "heading" and self._is_form(i, forms)]
+            if not hits:
+                hits = [i for i in range(frm, n) if self.blocks[i]["kind"] == "para" and self._is_form(i, forms)]
+                if hits:
+                    _log(self.log, self.where(self.blocks[hits[0]]), "chapter-start-not-heading",
+                         "%s: %s matched a paragraph, not a heading line" % (ch["unit_id"], what))
+        occ = ch.get("occurrence", 1)
+        if len(hits) < occ:
+            after = self.blocks[frm]["line"] if frm < n else "end"
+            raise SystemExit("%s: %s (occurrence %d) not found at or after line %s of %s"
+                             % (ch["unit_id"], what, occ, after, self.cfg["md"]))
+        i = hits[occ - 1]
+        if not ch.get("first_line"):
+            while i - 1 >= frm and self.blocks[i - 1]["kind"] == "heading" and self._is_form(i - 1, nums):
+                i -= 1
+        return i, [h for h in hits if h != hits[occ - 1]]
+
+    def _find_bounds(self, chapters):
+        starts, others, frm = [], [], 0
+        for ch in chapters:
+            i, rest = self._find_start(ch, frm)
+            starts.append(i)
+            others.append(rest)
+            frm = i + 1
+        bounds = {}
+        n = len(self.blocks)
+        for k, ch in enumerate(chapters):
+            a = starts[k]
+            nxt = starts[k + 1] if k + 1 < len(chapters) else n
+            if ch.get("stop_line"):
+                b = next((i for i in range(a + 1, n) if self._starts(i, ch["stop_line"])), None)
+                if b is None:
+                    raise SystemExit("%s: stop_line %r not found after its start" % (ch["unit_id"], ch["stop_line"]))
+                if b > nxt:
+                    raise SystemExit("%s: stop_line %r falls after the next chapter's start" % (ch["unit_id"], ch["stop_line"]))
+            else:
+                b = nxt
+            ambiguous = [self.blocks[i]["line"] for i in others[k] if a < i < b]
+            bounds[ch["unit_id"]] = (a, b, ambiguous, k + 1 == len(chapters) and not ch.get("stop_line"))
+        return bounds
+
+    def _is_furniture(self, it):
+        if it["kind"] not in ("heading", "para"):
+            return False
+        t = it["text"]
+        heads = [re.compile(p) for p in self.cfg.get("header_patterns", [])]
+        junk = JUNK_LINES | {norm(j) for j in self.cfg.get("junk_lines", [])}
+        return norm(t) in junk or _matches(t, heads) or any(p.match(t) for p in STAMP_PATTERNS)
+
+    def _at_page_end(self, items, k, fpat):
+        """True if only footnotes, furniture, and placeholders follow item k on its page."""
+        for it in items[k + 1:]:
+            if it["kind"] == "page":
+                return True
+            if it["kind"] in ("image", "formula", "comment") or self._is_furniture(it):
+                continue
+            if it["kind"] == "para" and fpat.match(it["text"]):
+                continue
+            return False
+        return True
+
+    def chapter(self, ch):
+        """Paragraphs of one chapter, with page markers and a notes block of moved footnotes."""
+        cfg, log = self.cfg, self.log
+        if log is not None:
+            log.unit = ch["unit_id"]
+        a, b, ambiguous, to_eof = self.bounds[ch["unit_id"]]
+        for line in ambiguous:
+            _log(log, None, "chapter-start-ambiguous", "the start heading also matches line %d, inside this chapter" % line)
+        if to_eof:
+            _log(log, None, "chapter-end-of-file", "last chapter runs to the end of %s; set stop_line to leave out back matter" % cfg["md"])
+        stats = Counter()
+        items = []
+        for blk in self.blocks[a:b]:
+            where = self.where(blk)
+            texts = md_block_texts(blk, cfg, self.ev, log, where, stats) if blk["kind"] in MD_TEXT_KINDS else [blk["lines"][0]]
+            for t in texts:
+                items.append({"kind": blk["kind"], "text": t, "page": blk["page"], "where": where})
+        if not ch.get("first_line"):
+            items = self._strip_heading(items, ch)
+        paras = self._assemble(items)
+        if stats["kept"]:
+            _log(log, None, "emphasis-kept", "%d *italic* or **bold** spans kept as Markdown (strip_emphasis removes them)" % stats["kept"])
+        if stats["stripped"]:
+            _log(log, None, "emphasis-stripped", "%d emphasis spans" % stats["stripped"])
+        return paras
+
+    def _strip_heading(self, items, ch):
+        idx = [k for k, it in enumerate(items) if it["kind"] in ("heading", "para")][:MAX_HEADING_BLOCKS]
+        if not idx:
+            return items
+        alt = list(ch.get("title_alt") or []) + ([ch["heading"]] if ch.get("heading") else [])
+        kept = strip_chapter_heading([items[k]["text"] for k in idx], ch["title"], ch.get("num"),
+                                     self.log, items[idx[0]]["where"], alt)
+        drop = set(idx[:len(idx) - len(kept)])
+        return [it for k, it in enumerate(items) if k not in drop]
+
+    def _assemble(self, items):
+        """Turn a chapter's items into paragraphs: drop, move, join, and mark pages.
+
+        Placeholders, running heads, and footnotes are taken out of the body.
+        Where any of them, or a page break, came between two body paragraphs,
+        the paragraphs are joined by the page-break rules (continues_across);
+        with nothing between them, only a lowercase continuation is joined
+        (continues_within). Every page with body text gets a page marker, on
+        its own line above a paragraph that starts the page or inline at the
+        seam of a join. Moved footnotes follow the body under FOOTNOTES_LABEL,
+        each after a comment naming its page.
+        """
+        cfg, log, ev = self.cfg, self.log, self.ev
+        fpat = re.compile(cfg["footnote_pattern"]) if cfg.get("footnote_pattern") else None
+        page_end_only = self.paged and cfg.get("footnotes_at_page_end", True)
+        out, notes, seam, marked = [], [], [], None
+        for k, it in enumerate(items):
+            kind, text, where, page = it["kind"], it["text"], it["where"], it["page"]
+            if kind == "page":
+                seam.append("page break")
+                continue
+            if kind in ("image", "formula"):
+                before = strip_comments(out[-1]["text"])[-50:] if out else ""
+                _log(log, where, kind + "-placeholder", "%s after: ...%s" % (text, before))
+                seam.append(kind)
+                continue
+            if kind == "comment":
+                _log(log, where, "comment-dropped", text)
+                continue
+            if kind == "code":
+                _log(log, where, "code-block", text[:80])
+            if self._is_furniture(it):
+                _log(log, where, "furniture-dropped", text)
+                seam.append("running head")
+                continue
+            if kind == "para" and fpat is not None and fpat.match(text):
+                if not page_end_only or self._at_page_end(items, k, fpat):
+                    notes.append(it)
+                    _log(log, where, "footnote-moved", text[:80])
+                    if is_open_ended(text):
+                        _log(log, where, "footnote-open-ended", "...%s" % text[-50:])
+                    seam.append("footnote")
+                    continue
+                _log(log, where, "footnote-candidate", "matches footnote_pattern but is not at a page end (kept): %s" % text[:80])
+            elif kind == "para" and fpat is None and MD_FOOTNOTE_HINT.match(text):
+                _log(log, where, "footnote-candidate", "set footnote_pattern if this is a note: %s" % text[:80])
+            if kind == "para" and PAGE_NUM_LINE.match(text):
+                _log(log, where, "furniture-candidate", "bare number kept: %s" % text)
+            marker = PAGE_MARKER % page if self.paged and page != marked else ""
+            prev = out[-1] if out else None
+            if kind == "para" and prev is not None and prev["kind"] == "para":
+                a = strip_comments(prev["text"])
+                at = "%s-%s" % (prev["end"], page) if self.paged and prev["end"] != page else where
+                joined = None
+                if seam:
+                    if continues_across(a, text):
+                        joined = join_across(prev["text"], text, ev, log, at, "page-break-joined", marker)
+                    elif is_open_ended(a):
+                        _log(log, at, "page-break-unjoined", "...%s | %s... (across %s)" % (a[-30:], text[:30], ", ".join(seam)))
+                elif continues_within(a, text):
+                    joined = join_across(prev["text"], text, ev, log, at, "block-join", marker)
+                elif (not self.paged and is_open_ended(a) and not is_heading(a) and not is_heading(text)
+                        and not LIST_MARKER.match(text)):
+                    _log(log, at, "page-break-unjoined", "...%s | %s... (no page evidence)" % (a[-30:], text[:30]))
+                if joined is not None:
+                    prev["text"], prev["end"] = joined, page
+                    marked = page if marker else marked
+                    seam = []
+                    continue
+            if kind == "heading":
+                _log(log, where, "section-heading", text)
+            if kind == "quote":
+                _log(log, where, "blockquote-source", text[2:62])
+            out.append({"kind": kind, "text": (marker + "\n" if marker else "") + text, "end": page})
+            marked = page if marker else marked
+            seam = []
+        bq, fixes = cfg.get("block_quotes", False), cfg.get("block_quote_fixes")
+        paras = [o["text"] for o in out]
+        if bq:
+            paras = [_single_quote_prefix(p) for p in mark_block_quotes(paras, log, fixes, MD_ITEM_START)]
+        note_paras = [("<!-- footnote on page %d -->\n" % n["page"] if self.paged else "") + n["text"] for n in notes]
+        if note_paras:
+            if bq:
+                note_paras = [_single_quote_prefix(p) for p in mark_block_quotes(note_paras, log, fixes, fpat)]
+            paras += [FOOTNOTES_LABEL] + note_paras
+        return paras
+
+
+def _single_quote_prefix(para):
+    """Collapse "> > " (a source quotation the detector marked again) to "> "."""
+    return re.sub(r"^((?:<!--[^\n]*?-->\n)*)> > ", r"\1> ", para)
+
+
+def make_md_extractor(cfg, log=None):
+    src = MdSource(cfg, log)
+    print("%s: %d blocks, %s" % (cfg["md"], len(src.blocks), "page breaks found" if src.paged else "no page breaks"))
+    return src.chapter
+
+
+def save_md_raw(cfg):
+    """Save the docling export, before any cleanup, to Work/Raw/{slug}/raw.txt."""
+    folder = os.path.join(RAW, cfg["slug"])
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "raw.txt")
+    with open(os.path.join(SOURCES, cfg["md"]), encoding="utf-8-sig") as f:
+        text = f.read()
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    return path
+
+
 def make_extractor(cfg, log=None):
     path = os.path.join(SOURCES, cfg["pdf"])
     with pymupdf.open(path) as doc:
@@ -1301,10 +1863,11 @@ def make_extractor(cfg, log=None):
 
 def validate_config(cfg):
     errors = []
-    src = cfg.get("slug") or cfg.get("pdf") or cfg.get("epub") or cfg.get("txt")
+    src = cfg.get("slug") or cfg.get("pdf") or cfg.get("epub") or cfg.get("txt") or cfg.get("md")
     if not cfg.get("slug"):
-        errors.append("source %r has no slug" % (cfg.get("pdf") or cfg.get("epub") or cfg.get("txt")))
+        errors.append("source %r has no slug" % (cfg.get("pdf") or cfg.get("epub") or cfg.get("txt") or cfg.get("md")))
     epub = bool(cfg.get("epub"))
+    md = bool(cfg.get("md"))
     seen = set()
     for ch in cfg["chapters"]:
         uid = ch.get("unit_id")
@@ -1318,6 +1881,12 @@ def validate_config(cfg):
         if epub:
             if not ch.get("file"):
                 errors.append("%s: chapter %r has no EPUB file" % (src, uid))
+        elif md:
+            if "start" in ch or "end" in ch:
+                errors.append("%s: chapter %r: Markdown chapters are bounded by heading, first_line, "
+                              "and stop_line, not start/end pages" % (src, uid))
+            if not (ch.get("title") or ch.get("heading") or ch.get("first_line") or ch.get("num") is not None):
+                errors.append("%s: chapter %r has no title, heading, num, or first_line to find its start" % (src, uid))
         elif ch["end"] < ch["start"]:
             errors.append("%s: chapter %r ends before it starts" % (src, uid))
     return errors
@@ -1391,6 +1960,22 @@ if __name__ == "__main__":
             print("raw text -> %s" % save_txt_raw(cfg))
             log = RepairLog()
             build_markdown(cfg["title"], cfg["part"], cfg["chapters"], make_txt_extractor(cfg, log), cfg["slug"], cfg["txt"])
+            for kind, prefix in check_block_quote_fixes(cfg, os.path.join(OUT, cfg["slug"])):
+                print("WARNING block_quote_fixes %s matches no paragraph: %r" % (kind, prefix))
+            log_path = os.path.join(RAW, cfg["slug"], "repairs.tsv")
+            log.write(log_path)
+            print("repair log: %d entries -> %s" % (len(log.rows), log_path))
+            continue
+        if cfg.get("md"):
+            if not cfg["chapters"]:
+                continue
+            problems = validate_config(cfg)
+            if problems:
+                raise SystemExit("SOURCES_CONFIG errors:\n  " + "\n  ".join(problems))
+            ran = True
+            print("raw text -> %s" % save_md_raw(cfg))
+            log = RepairLog()
+            build_markdown(cfg["title"], cfg["part"], cfg["chapters"], make_md_extractor(cfg, log), cfg["slug"], cfg["md"])
             for kind, prefix in check_block_quote_fixes(cfg, os.path.join(OUT, cfg["slug"])):
                 print("WARNING block_quote_fixes %s matches no paragraph: %r" % (kind, prefix))
             log_path = os.path.join(RAW, cfg["slug"], "repairs.tsv")

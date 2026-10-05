@@ -11,7 +11,7 @@ import pymupdf
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import extract  # noqa: E402
-from common import ends_sentence, strip_comments  # noqa: E402
+from common import ends_sentence, is_heading, strip_comments  # noqa: E402
 from extract import DocEvidence, RepairLog, join_lines, join_pages, strip_chapter_heading  # noqa: E402
 
 
@@ -505,3 +505,159 @@ class BlockQuotes(unittest.TestCase):
         lines = ["quoted words that run all the way to the right margin and end. (Marlow 1986, 82)",
                  "The harbor workers have been talking about it ever since then."]
         self.assertEqual(len(extract.txt_paragraphs(lines, cfg, DocEvidence(), 70)), 2)
+
+
+class DoclingMarkdown(unittest.TestCase):
+    """The docling Markdown path: chapter bounds, page breaks, unescaping, footnotes."""
+
+    def extract(self, md, chapters, **cfg):
+        """Run the Markdown extractor on md; return ({unit_id: paragraphs}, log)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "src.md"), "w", encoding="utf-8", newline="\n") as f:
+                f.write(md)
+            old = extract.SOURCES
+            extract.SOURCES = tmp
+            try:
+                log = RepairLog()
+                cfg = dict(cfg, md="src.md", slug="src", chapters=chapters)
+                ex = extract.make_md_extractor(cfg, log)
+                return {ch["unit_id"]: ex(ch) for ch in chapters}, log
+            finally:
+                extract.SOURCES = old
+
+    def one(self, body, title="War", **cfg):
+        out, log = self.extract("## %s\n\n%s" % (title, body), [{"unit_id": "ch-01", "slug": "a", "title": title}], **cfg)
+        return out["ch-01"], log
+
+    def test_chapters_split_at_headings_and_headings_stripped(self):
+        md = ("# The Book\n\n## Contents\n\nFront matter.\n\n## Chapter 1\n\n## The Long War\n\nWar began.\n\n"
+              "## 2 The Peace\n\nPeace came.\n\n## Index\n\nwar, 1\n")
+        chapters = [{"unit_id": "ch-01", "slug": "a", "title": "The Long War", "num": 1},
+                    {"unit_id": "ch-02", "slug": "b", "title": "The Peace", "num": 2, "stop_line": "## Index"}]
+        out, log = self.extract(md, chapters)
+        self.assertEqual(out, {"ch-01": ["War began."], "ch-02": ["Peace came."]})
+        self.assertEqual([r[3] for r in log.rows if r[2] == "heading-stripped"], ["Chapter 1", "The Long War", "2 The Peace"])
+        self.assertEqual(log.kinds().count("no-page-markers"), 1)
+
+    def test_page_breaks_become_page_markers(self):
+        body = ("The treaty was\n\n<!-- page break -->\n\nsigned in 1919.\n\nNext paragraph.\n\n"
+                "<!-- page break -->\n\nA new page starts here.\n")
+        paras, log = self.one(body, first_page=5)
+        self.assertEqual(paras, ["<!-- page 5 -->\nThe treaty was <!-- page 6 --> signed in 1919.",
+                                 "Next paragraph.", "<!-- page 7 -->\nA new page starts here."])
+        self.assertIn("page-break-joined", log.kinds())
+        self.assertNotIn("no-page-markers", log.kinds())
+
+    def test_pdf_pages_from_page_breaks(self):
+        md = "## War\n\nFirst page.\n\n<!-- page break -->\n\nSecond page.\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "src.md"), "w", encoding="utf-8") as f:
+                f.write(md)
+            old = extract.SOURCES, extract.OUT
+            extract.SOURCES, extract.OUT = tmp, tmp
+            try:
+                cfg = {"md": "src.md", "slug": "src", "first_page": 3,
+                       "chapters": [{"unit_id": "ch-01", "slug": "war", "title": "War", "num": None}]}
+                self.assertEqual(extract.validate_config(cfg), [])
+                extract.build_markdown("Book", 1, cfg["chapters"], extract.make_md_extractor(cfg), "src", "src.md")
+                with open(os.path.join(tmp, "src", "01-war.md"), encoding="utf-8") as f:
+                    text = f.read()
+            finally:
+                extract.SOURCES, extract.OUT = old
+        self.assertIn('pdf_pages: "3-4"\n', text)
+        self.assertIn("word_count: 4\n", text)
+        self.assertTrue(text.endswith("# War\n\n<!-- page 3 -->\nFirst page.\n\n<!-- page 4 -->\nSecond page.\n"))
+
+    def test_entities_and_backslash_escapes_are_undone(self):
+        paras, _ = self.one("Smith &amp; Jones wrote \\_init\\_ and &lt;b&gt; for AT&T \\*not emphasis\\*.\n")
+        self.assertEqual(paras, ["Smith & Jones wrote _init_ and <b> for AT&T *not emphasis*."])
+
+    def test_image_and_formula_placeholders_dropped_and_logged(self):
+        paras, log = self.one("Text before.\n\n<!-- image -->\n\n<!-- formula-not-decoded -->\n\nText after.\n")
+        self.assertEqual(paras, ["Text before.", "Text after."])
+        self.assertIn("image-placeholder", log.kinds())
+        self.assertIn("formula-placeholder", log.kinds())
+
+    def test_table_kept_as_one_block(self):
+        table = "| Year | Count \\| total |\n|------|-------|\n| 1990 | 12 &lt; 13 |"
+        paras, _ = self.one("Table 1 Counts\n\n" + table + "\n\nAfter.\n")
+        self.assertEqual(paras, ["Table 1 Counts", "| Year | Count \\| total |\n|------|-------|\n| 1990 | 12 < 13 |", "After."])
+
+    def test_list_items_kept(self):
+        paras, _ = self.one("The rules are:\n\n- arrive on time\n- leave early\n")
+        self.assertEqual(paras, ["The rules are:", "- arrive on time\n- leave early"])
+
+    def test_footnotes_moved_and_interrupted_paragraph_rejoined(self):
+        body = ("The treaty was\n\n1 A note on the treaty.\n\n2 Another note.\n\n<!-- page break -->\n\n"
+                "signed in 1919.\n\nThe next paragraph.\n")
+        paras, log = self.one(body, footnote_pattern=r"^\d{1,3}\s")
+        self.assertEqual(paras, [
+            "<!-- page 1 -->\nThe treaty was <!-- page 2 --> signed in 1919.",
+            "The next paragraph.",
+            extract.FOOTNOTES_LABEL,
+            "<!-- footnote on page 1 -->\n1 A note on the treaty.",
+            "<!-- footnote on page 1 -->\n2 Another note.",
+        ])
+        self.assertEqual(log.kinds().count("footnote-moved"), 2)
+        self.assertIn("page-break-joined", log.kinds())
+
+    def test_footnote_without_page_breaks_rejoins_paragraph(self):
+        paras, log = self.one("The treaty was\n\n12 A note.\n\nsigned in 1919.\n", footnote_pattern=r"^\d{1,3}\s")
+        self.assertEqual(paras, ["The treaty was signed in 1919.", extract.FOOTNOTES_LABEL, "12 A note."])
+        self.assertEqual([k for k in log.kinds() if k.startswith("page-break")], ["page-break-joined"])
+
+    def test_footnote_mid_page_is_kept_and_logged(self):
+        body = "Body.\n\n1 Not a note but a numbered line.\n\nMore body.\n\n<!-- page break -->\n\nNext.\n"
+        paras, log = self.one(body, footnote_pattern=r"^\d{1,3}\s")
+        self.assertIn("1 Not a note but a numbered line.", paras)
+        self.assertIn("footnote-candidate", log.kinds())
+
+    def test_running_head_dropped_and_logged(self):
+        body = "The treaty was\n\nHARBOR TOWN HISTORY\n\nsigned in 1919.\n\n## HARBOR TOWN HISTORY\n\nMore.\n"
+        paras, log = self.one(body, header_patterns=[r"^HARBOR TOWN HISTORY$"])
+        self.assertEqual(paras, ["The treaty was signed in 1919.", "More."])
+        self.assertEqual(log.kinds().count("furniture-dropped"), 2)
+
+    def test_source_block_quotes_kept(self):
+        paras, log = self.one("She wrote:\n\n> The tide came in.\n> The boats came home.\n>\n> Second quoted paragraph.\n\nProse.\n")
+        self.assertEqual(paras, ["She wrote:", "> The tide came in. The boats came home.",
+                                 "> Second quoted paragraph.", "Prose."])
+        self.assertIn("blockquote-source", log.kinds())
+
+    def test_block_quote_detection_does_not_double_mark_or_touch_tables(self):
+        body = "She wrote:\n\n> I used to feel that. (Marlow 1986, 82)\n\nAs shown:\n\n| a | b |\n|---|---|\n\nProse.\n"
+        paras, _ = self.one(body, block_quotes=True)
+        self.assertEqual(paras, ["She wrote:", "> I used to feel that. (Marlow 1986, 82)",
+                                 "As shown:", "| a | b |\n|---|---|", "Prose."])
+
+    def test_section_headings_become_plain_lines(self):
+        paras, log = self.one("Intro.\n\n### A Section\n\nBody of section.\n")
+        self.assertEqual(paras, ["Intro.", "A Section", "Body of section."])
+        self.assertTrue(is_heading(paras[1]))
+        self.assertIn("section-heading", log.kinds())
+
+    def test_hyphen_space_logged_or_rejoined(self):
+        paras, log = self.one("The popu- lation grew, pre- and post-war.\n")
+        self.assertEqual(paras, ["The popu- lation grew, pre- and post-war."])
+        self.assertEqual(log.kinds().count("hyphen-space-kept"), 1)
+        paras, log = self.one("The popu- lation grew.\n", hyphen_spaces=True)
+        self.assertEqual(paras, ["The population grew."])
+        self.assertIn("hyphen-removed", log.kinds())
+
+    def test_ligatures_normalized_and_bad_characters_logged(self):
+        paras, log = self.one("The ﬁrst � mark GLYPH<c=3,font=/AB>.\n")
+        self.assertEqual(paras, ["The first � mark GLYPH<c=3,font=/AB>."])
+        self.assertIn("replacement-char", log.kinds())
+        self.assertIn("glyph-placeholder", log.kinds())
+
+    def test_raw_text_saved_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "src.md"), "w", encoding="utf-8", newline="\n") as f:
+                f.write("## War\n\nA &amp; B.\n")
+            old = extract.SOURCES, extract.RAW
+            extract.SOURCES, extract.RAW = tmp, tmp
+            try:
+                with open(extract.save_md_raw({"md": "src.md", "slug": "src"}), encoding="utf-8") as f:
+                    self.assertEqual(f.read(), "## War\n\nA &amp; B.\n")
+            finally:
+                extract.SOURCES, extract.RAW = old

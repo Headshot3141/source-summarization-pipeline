@@ -14,14 +14,21 @@ def words_in_text(text):
     wherever they sit, so a marker inside a word or sentence changes
     nothing. Then lines starting with ``#`` (headings) are excluded, and
     the Markdown block-quote marker (``>`` at the start of a line) is
-    removed, so a block quotation counts its words only. YAML frontmatter
-    is not stripped, so pass body text only.
+    removed, so a block quotation counts its words only. In a Markdown
+    table (a line starting with ``|``), the separator row is skipped and
+    the cell pipes are not counted, so a table counts its cell words only.
+    YAML frontmatter is not stripped, so pass body text only.
     """
     kept = []
     for line in re.sub(r"<!--.*?-->", "", text, flags=re.S).splitlines():
         if line.startswith("#"):
             continue
-        kept.append(re.sub(r"^\s*(?:>\s?)+", "", line))
+        line = re.sub(r"^\s*(?:>\s?)+", "", line)
+        if line.lstrip().startswith("|"):
+            if re.fullmatch(r"[\s|:-]*", line):
+                continue
+            line = line.replace("\\|", " ").replace("|", " ")
+        kept.append(line)
     return len(re.findall(r"\S+", "\n".join(kept)))
 
 

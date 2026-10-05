@@ -20,7 +20,7 @@ A sentence that is plain but clear is finished. Leave it alone. Churn is a cost,
 2. **Quoted material is untouchable**, byte for byte, including its punctuation and any em dashes. That includes block quotations (lines starting `> `). Edit around a quotation; do not move its boundaries.
 3. **The preservation rule in `writing-rules.md` outranks style.** You may rephrase a contrast connective but not drop or weaken the reversal, or move it to a different scope. Hedges, estimate markers, and scope words are meaning, never unnecessary adverbs. A marker on another speaker's view may not be dropped, and another speaker's view may not move into the narrative voice, where it reads as the author's. Do not combine, total, average, convert, or round any figure. Keep claims with their evidence.
 4. **Add nothing and remove no information.** Cutting filler words is in scope; cutting a clause that carries information is not.
-5. **Word count is not a constraint.** Clearer and longer beats shorter and murky. Do not count words, trim to fit, or pad. `check_words.py` is not run on this pass.
+5. **Length is a loose constraint.** Clearer and slightly longer beats shorter and murky. Do not count words, trim to fit, or pad. The document must stay at or under 0.55 of its source; the coordinator checks that with `check_words.py` after each batch.
 6. **Structure is preserved.** `##` and `###` heading text stays exact. Split a paragraph only when it is unreadable; never merge paragraphs.
 
 ## What to fix, in priority order
@@ -78,7 +78,8 @@ Absolute constraints, from BRIEF:
   every edit. A preface such as "X argues" on the author's own view is
   not a protected marker (BRIEF, item 3).
 - Add nothing and remove no information.
-- Word count does not matter. Do not count words, trim to fit, or pad.
+- Do not count words, trim to fit, or pad. A clarity edit may lengthen a
+  sentence slightly.
 - Keep ## and ### heading text exactly, and do not merge paragraphs.
 
 Apply each fix as a targeted string replacement. Do not rewrite or
@@ -114,14 +115,14 @@ The agent reads the brief only through this section, so the status tables below 
 
 **Gate after each batch.**
 
-1. Run `python Work/check_style_pass.py`. It compares every summary with the archive and flags changed quotations, numbers, headings, paragraph counts, and any drop in protected hedge, contrast, or attribution markers. Then run `{AUTHOR_CHECK_COMMAND}` on the batch's files. Any paragraph it still flags must appear in the record with the other speaker's view that justifies the second reference.
-2. Investigate every flag. `NUMBER ORDER` means the same numbers were reordered; confirm each still attaches to the right claim. A protected-marker flag on "according to", "while", or "yet" may be a non-attributive or temporal sense. A flag on "according to" or "in his/her/their view" is a correct edit when the phrase only prefaced the author's own view (item 3); it is a defect when it marked another speaker's view.
+1. Run `python Work/check_words.py` and confirm the document ratio is still at or under 0.55. Run `python Work/check_style_pass.py`. It compares every summary with the archive and flags changed quotations, numbers, headings, paragraph counts, and any drop in protected hedge, contrast, or attribution markers. Then run `{AUTHOR_CHECK_COMMAND}` on the batch's files. Any paragraph it still flags must appear in the record with the other speaker's view that justifies the second reference.
+2. Investigate every flag. `NUMBER ORDER` means the same numbers were reordered; confirm each still attaches to the right claim. A protected-marker flag on "according to", "while", or "yet" may be a non-attributive or temporal sense. A flag on "according to" or "in his/her/their view" is a correct edit when the phrase only prefaced the author's own view (item 3); it is a defect when it marked another speaker's view. In an interview or edited collection, read every ADVISORY line: the checker treats every name in the unit's `Work/author_refs.json` entry as the author, so a removed interviewer marker also shows as ADVISORY, and ADVISORY lines do not fail the check.
 3. Read the before-and-after quotes in each record for edits touching hedges, contrasts, attribution, or numbers. Spot-check referent substitutions against the archive, and against the chapter source when the choice is not obvious from the text: an agent resolving a pronoun without the source can pick the nearest name.
 4. Correct a bad edit directly and note it in the record.
 5. Log agent reports in the Reported items table; do not fix them in this pass. They are the input to a targeted-fix pass (`passes/targeted-fix-pass.md`).
 6. Update the status tables and commit the batch with its progress count, for example "Style pass: {source} ch-03 to ch-08 (24 of {TOTAL})".
 
-**Final steps.** Only after every chapter is done: `python Work/assemble.py`, `python Work/build_pdf.py`, and inspection of sampled PDF pages (first, second, middle, last) for layout damage. Record the pass in `Work/checks.md`.
+**Final steps.** Only after every chapter is done: `python Work/assemble.py` and `python Work/check_words.py`. Record the pass in `Work/checks.md`. The PDF is rendered and inspected once, after the last pass (plan.md Step 12).
 
 ## Pacing
 

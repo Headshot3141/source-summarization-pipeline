@@ -6,6 +6,28 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 HARD_CAP = 32_000  # bytes, UTF-8, complete file
 
+# Compression targets (plan.md, Goal). The summarizer drafts each unit to
+# DRAFT_RATIO of its retained source words (the budget tables' Target), within
+# RANGE_PCT. Review and later passes may grow a unit by up to REVIEW_ALLOWANCE
+# of its source words where clarity or fidelity needs it (the unit's ceiling).
+# Units may run shorter or longer; the document as a whole aims at DOC_TARGET
+# and must not exceed DOC_MAX.
+DRAFT_RATIO = 0.40
+RANGE_PCT = 0.15
+REVIEW_ALLOWANCE = 0.10
+DOC_TARGET = 0.50
+DOC_MAX = 0.55
+
+
+def draft_range(budget):
+    """(lower, upper) word range a draft should land in."""
+    return round(budget * (1 - RANGE_PCT)), round(budget * (1 + RANGE_PCT))
+
+
+def review_ceiling(budget, source_words):
+    """Words a reviewed unit may reach without a recorded preservation reason."""
+    return budget + round(source_words * REVIEW_ALLOWANCE)
+
 OWNED_START = "<!-- begin owned text -->\n"
 OWNED_END = "\n<!-- end owned text -->"
 
