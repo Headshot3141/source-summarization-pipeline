@@ -1,6 +1,6 @@
 # Independent Verification and Remediation
 
-Template for a post-review check of accepted chapter summaries. Copy this file to the project root as `verification-pass.md`, fill in the placeholders, and use it as the brief, item list, and status record for the pass. Agents read this file, `writing-rules.md`, and their assigned files, and never `plan.md`.
+Template for a post-review check of accepted chapter summaries. Copy this file to the project root as `verification-pass.md`, fill in the placeholders, and use it as the brief, item list, and status record for the pass. Agents read the sections of this file their prompt names, `writing-rules.md`, and their assigned files, and never `plan.md`.
 
 ## Why this pass exists
 
@@ -16,11 +16,11 @@ In an earlier run, a cheaper model drafted and reviewed every chapter and all we
 
 Classes 5 and 6 are invisible to any check that verifies each summary statement against the source, because every retained statement is accurate. The original reviewer's records showed it had seen many of these losses and accepted them as low-consequence omissions, so the fault was a discretionary threshold, not detection. A stronger model alone does not fix that; the enumerable preservation rule in `writing-rules.md` and the audit below do. Word counts were no signal: most defective chapters sat just under their ceiling, and some dropped key passages with room to spare.
 
-The template's summarizer and reviewer prompts now apply the preservation rule from the start. Run this pass anyway when drafting used a cheaper model, and size it by what the first round finds.
+The template's summarizer and reviewer prompts now apply the preservation rule from the start. Run this pass anyway, because Sonnet 5.5 drafts, and size it by what the first round finds.
 
 ## Plan of the pass
 
-1. **Round 1, report-only sample.** Pick about 10-15% of chapters across every source, weighted toward long, argument-dense, and late-processed chapters. One fresh-context agent per chapter, using the verifier prompt below and a model stronger than the drafting model. Agents change nothing.
+1. **Round 1, report-only sample.** Pick about 10-15% of chapters across every source, weighted toward long, argument-dense, and late-processed chapters. One fresh-context Opus 5.5 agent per chapter, using the verifier prompt below. Agents change nothing.
 2. **Triage.** The coordinator checks each material finding against the source, confirms, downgrades, or upgrades it, and tallies findings per source in the Round results table.
 3. **Decide scope with the user.** Project the material-findings rate per source onto the unchecked chapters. Options: fix only the sampled chapters; full coverage; or risk-ordered full coverage, worst source first, stopping early on any source that proves clean. Partial remediation leaves a document with no marking of which chapters were verified, so full or risk-ordered coverage is usually right. Record the decision.
 4. **Remediation rounds.** Mode A (verify and fix) for chapters with no round-1 record; Mode B (fix only) for sampled chapters, working from their round-1 record. Size each round to fit one usage window (see Pacing).
@@ -39,7 +39,8 @@ SUMMARY: Work/Summaries/{slug}/{NN}-{name}.md
 RECORD: Work/Reviews/{slug}/verify-round1/{NN}-{name}.md
 BRIEF: {verification-pass.md}, sections "Rules for verifiers" and "Verifier record"
 SHARED INSTRUCTIONS: writing-rules.md
-WORD COUNT COMMAND: python Work/count_words.py <SUMMARY path>
+WORD COUNT COMMAND: {WORD_COUNT_COMMAND}
+AUTHOR: {AUTHOR_CONVENTION}
 BUDGET: {BUDGET}; range {LOWER}-{UPPER}.
 
 Read the two BRIEF sections, the shared instructions, then SOURCE and
@@ -110,7 +111,9 @@ ROUND1: Work/Reviews/{slug}/verify-round1/{NN}-{name}.md   (Mode B only)
 RECORD: Work/Reviews/{slug}/verify-round2/{NN}-{name}.md
 BRIEF: {verification-pass.md}, sections "Rules for verifiers" and "Remediation rules"
 SHARED INSTRUCTIONS: writing-rules.md
-WORD COUNT COMMAND: python Work/count_words.py <SUMMARY path>
+WORD COUNT COMMAND: {WORD_COUNT_COMMAND}
+AUTHOR CHECK COMMAND: {AUTHOR_CHECK_COMMAND}
+AUTHOR: {AUTHOR_CONVENTION}
 BUDGET: {BUDGET}; range {LOWER}-{UPPER}.
 
 Read the two BRIEF sections, the shared instructions, SOURCE and SUMMARY in
@@ -130,7 +133,7 @@ and anything left unresolved.
 
 - Repair the defect and nothing else. Make local edits at the point of error with targeted string replacements; do not rewrite paragraphs, restyle faithful prose, or reorganize the chapter. Every edit is traceable to a specific source passage.
 - Restore from the source only, in as few words as the source allows.
-- Restore a missing marker only on a view that belongs to someone other than the author, under the naming rule in `writing-rules.md`. Do not add the author's name, "the author", or a pronoun to the author's own claims: the summary states them directly. A restored claim joins its paragraph as a plain sentence. After editing, run `python Work/check_author_refs.py <SUMMARY path>` and fix any paragraph your edits pushed over the limit.
+- Restore a missing marker only on a view that belongs to someone other than the author, under the naming rule in `writing-rules.md`. Do not add the author's name, "the author", or a pronoun to the author's own claims: the summary states them directly. A restored claim joins its paragraph as a plain sentence. After editing, run AUTHOR CHECK COMMAND and recast any paragraph your edits pushed over the limit, unless its second reference keeps another speaker's view apart from the author's; record each such paragraph under Author naming.
 - Preservation is a sufficient reason to exceed the ±15% range. Record the final count, the range, and a one-line reason for any overage. The exemption covers restored source meaning only. Do not pad, and do not cut faithful content to make room.
 - Before finalizing, record the audit: (1) every contrast marker in the source, with whether its reversal is present in the summary or why its claim was omitted entirely; (2) every number, quantity, date range, and proportion in the summary with its source location, flagging any the source does not state in that form. Then self-certify (b), (c), and (e) in one line each. Self-certification alone did not hold in earlier runs; the two lists are the audit trail.
 
@@ -149,6 +152,8 @@ Each: before, after, the source quote that authorizes it, and the rule item or d
 ## Number audit (d)
 ## Self-certification
 (b) modality, (c) attribution, (e) claim-evidence pairing: one line each.
+## Author naming
+The AUTHOR CHECK COMMAND result, and each flagged paragraph kept with the other speaker that justifies it.
 ## Unresolved
 Source ambiguities and anything needing the original document. Do not reconstruct missing facts.
 ```
@@ -158,7 +163,8 @@ Source ambiguities and anything needing the original document. Do not reconstruc
 1. Diff each chapter against `Work/Summaries_preverify/` (`git diff --no-index --word-diff=plain`). Every hunk maps to an edit in the record; revert unexplained hunks.
 2. For every changed number, date, name, or quotation, open the source at the cited page marker and confirm.
 3. Read the contrast and number audits for gaps; spot-check the self-certifications.
-4. Record final counts and overage reasons; set statuses with `Work/set_status.py`; update the Status table below; commit the batch with its progress count.
+4. Run `{AUTHOR_CHECK_COMMAND}` on the batch's files. Any paragraph it still flags must appear in the record's Author naming section with the other speaker that justifies it.
+5. Record final counts and overage reasons; set statuses with `Work/set_status.py`; update the Status table below; commit the batch with its progress count.
 
 ## Pacing
 

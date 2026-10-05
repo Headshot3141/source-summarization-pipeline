@@ -1,6 +1,6 @@
 # Writing Rules for All Agents
 
-These are the shared writing instructions for every summarizer, reviewer, merger, and later-pass agent. They are complete on their own: no other style guide applies.
+These are the shared writing instructions for every agent that writes, edits, reviews, or verifies a summary. They are complete on their own: no other style guide applies.
 
 Priority order: fidelity to the source first, then coverage of the main arguments, then clear standalone prose, then style preferences and word targets. Where a style instruction conflicts with fidelity, follow fidelity.
 
@@ -50,13 +50,13 @@ The check script `Work/check_author_refs.py` flags paragraphs with more than one
 
 ## Style
 
-The goal is prose that is clear and concise for a reader who has not read the source. Everything in this section serves that goal. A sentence that is plain but clear is finished: do not rework it to satisfy a guideline, and never make a passage awkward or roundabout to avoid a pattern listed here.
+The goal is prose that is clear and concise for a reader who has not read the source. Everything in this section serves that goal. The Requirements below always apply. The Guidance patterns are judgment: a sentence that is plain but clear is finished, so do not rework it to satisfy a Guidance item, and never make a passage awkward or roundabout to avoid one of those patterns.
 
 ### Requirements
 
 - Write in the third person. Never address the reader.
 - Do not use em dashes in summary prose. Text inside quotation marks and block quotations keeps its original punctuation, and extracted source text is never edited.
-- Write in paragraphs. Use a list only where the source passage is itself a list. The only other Markdown in a summary is a reproduced block quotation (`> `).
+- Write in paragraphs. Use a list only where the source passage is itself a list. Apart from the headings your prompt asks for, the only other Markdown in a summary is a reproduced block quotation (`> `).
 - State the author's views directly (see "Naming the author"). Clearly mark views that belong to others: quoted speakers, opponents, cited writers, and allegations. Do not present a quoted opponent's view as the author's.
 - Keep qualifications and distinctions. Do not turn association into causation, possibility into certainty, or a single example into a general claim.
 - Explain source-defined terms for a reader who has not read the original, using only the source.

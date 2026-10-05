@@ -1,6 +1,6 @@
 """Write Work/transition_queue.txt: one line per merged multi-part chapter.
 
-Each line drives one transition-review task (plan.md Section 7):
+Each line drives one transition-review task (plan.md Step 7):
 
     slug|unit_id|part_count|chapter_summary|title|part_source_1;part_source_2;...
 

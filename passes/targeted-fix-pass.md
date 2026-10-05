@@ -90,6 +90,30 @@ These are absolute. An edit that breaks one is a defect, however good the result
 
 Agents do not open the original documents in `Sources/`, `Work/Raw/`, other `Work/Summaries_*/` snapshots, `Work/Summaries/{slug}/parts/` (stale files that do not feed `Summary.md`), or earlier review records.
 
+## Record format
+
+```markdown
+# {slug} {unit_id}: {pass name}
+
+Edits applied: N
+
+## {ITEM-ID}
+Disposition: fixed | restored | clarified | faithful | declined | not a defect | unresolved
+Source: <!-- page N -->, "short exact excerpt from the chapter source"
+Before: exact summary text (omit if unchanged)
+After: exact summary text (omit if unchanged)
+Reason: one or two sentences.
+
+## Author naming
+The AUTHOR CHECK COMMAND result, and each flagged paragraph kept with the
+other speaker that justifies it.
+
+## New reports
+Anything else noticed, not changed.
+```
+
+The source excerpt is required for every disposition except `unresolved`. It lets the coordinator check the decision without rereading the chapter.
+
 ## Agent prompt
 
 ```text
@@ -103,6 +127,8 @@ SOURCE: Work/Chapters/{slug}/{NN}-{name}.md
 BRIEF: {pass-name}.md
 WRITING RULES: writing-rules.md
 RECORD: Work/Reviews/{slug}/{pass-name}/{NN}-{name}.md
+AUTHOR CHECK COMMAND: {AUTHOR_CHECK_COMMAND}
+AUTHOR: {AUTHOR_CONVENTION}
 
 ITEMS:
 {paste this chapter's item rows from BRIEF}
@@ -125,8 +151,9 @@ source, leave it alone, even if the source is factually wrong.
 Absolute constraints, from BRIEF:
 - Change only what an item requires. Report anything else; do not fix it.
 - Anything restored or added comes from the source at that point.
-- Contrast reversals, hedges, scope words, attribution markers, and
-  claim-evidence pairs survive every edit, at the source's strength.
+- Contrast reversals, hedges, scope words, attribution markers on other
+  speakers' views, and claim-evidence pairs survive every edit, at the
+  source's strength.
 - Numbers and quotations change only to match the source exactly. Never
   compute a figure.
 - Restore a missing marker only on another speaker's view (the naming
@@ -135,8 +162,12 @@ Absolute constraints, from BRIEF:
 - Keep ## and ### heading text and paragraph breaks.
 - Targeted string replacements only. Edit only SUMMARY and RECORD.
 
-Write RECORD in the format BRIEF gives, with a source excerpt for every
-disposition except unresolved.
+After your last edit, run AUTHOR CHECK COMMAND on SUMMARY and recast any
+paragraph your edits pushed over the limit, unless its second reference
+keeps another speaker's view apart from the author's.
+
+Write RECORD in the format BRIEF gives ("Record format"), with a source
+excerpt for every disposition except unresolved.
 
 Reply in under 150 words with counts per disposition, the most substantial
 change, and any new reports.
@@ -144,31 +175,11 @@ change, and any new reports.
 
 For an agent handling several short chapters (group them so each agent has about 2 to 5 sub-points), repeat the SUMMARY / SOURCE / RECORD / ITEMS block once per chapter and add: "Handle each chapter separately, with its own RECORD."
 
-## Record format
-
-```markdown
-# {slug} {unit_id}: {pass name}
-
-Edits applied: N
-
-## {ITEM-ID}
-Disposition: fixed | restored | clarified | faithful | declined | not a defect | unresolved
-Source: <!-- page N -->, "short exact excerpt from the chapter source"
-Before: exact summary text (omit if unchanged)
-After: exact summary text (omit if unchanged)
-Reason: one or two sentences.
-
-## New reports
-Anything else noticed, not changed.
-```
-
-The source excerpt is required for every disposition except `unresolved`. It lets the coordinator check the decision without rereading the chapter.
-
 ## Coordinator procedure
 
 **Setup.** Move the reports verbatim into the Items section below, grouped by source and chapter. Give each an ID `{PREFIX}-{SRC}-{NN}-{n}`, lettering sub-points `a`, `b`, `c` so each gets its own disposition. Keep the prior note on each item. Then snapshot the affected summaries: `python Work/snapshot_summaries.py {pass} <files>`. Never touch earlier snapshots.
 
-**Before each batch**, where usage is limited, ask the user for the current usage reading and never start a batch that could cross their stopping point. Record readings in the usage log.
+**Before each batch**, where usage is limited, read the current usage reading with the session-management usage tool and never start a batch that could cross the user's stopping point. Record readings in the usage log.
 
 **Gate after each batch.** `Work/check_style_pass.py` is not the gate: this pass may legitimately change numbers and quotations.
 
@@ -176,7 +187,8 @@ The source excerpt is required for every disposition except `unresolved`. It let
 2. Search the chapter source for every added phrase. Agents in earlier runs added words the source lacks ("historians", "onward"), dropped a phrase while restoring a clause, stretched a source phrase over more referents than it covers, and computed figures. Where an agent supplied a connecting verb, confirm it adds no claim.
 3. For every changed number, date, name, or quotation, open the source at the cited page marker and confirm the new text matches.
 4. Spot-check `faithful`, `declined`, and `not a defect` dispositions against the source, especially items reported as likely errors.
-5. Update each item's Status cell (for example `restored (a, c); declined (b)`), log new reports, and commit the batch as "{Pass name}: {source} ch-NN to ch-NN (N of TOTAL)".
+5. Run `{AUTHOR_CHECK_COMMAND}` on the batch's files. Any paragraph it still flags must appear in the record's Author naming section with the other speaker that justifies it.
+6. Update each item's Status cell (for example `restored (a, c); declined (b)`), log new reports, and commit the batch as "{Pass name}: {source} ch-NN to ch-NN (N of TOTAL)".
 
 **Final steps.** `python Work/assemble.py`, `python Work/build_pdf.py`. Locate the changed passages in the PDF (for example with a PyMuPDF text search), render those pages, and inspect them for layout damage. Record the pass in `Work/checks.md`, and decide with the user whether the New reports warrant another pass.
 

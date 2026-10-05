@@ -38,7 +38,9 @@ HEADING = re.compile(r"^#{2,3} .*$", re.M)
 # A block quotation reproduces the source exactly, so a style pass never touches it.
 BLOCK_QUOTE = re.compile(r"^>.*$", re.M)
 
-# Markers whose loss changes meaning (preservation rule (a)-(c) in writing-rules.md).
+# Markers whose loss usually changes meaning (preservation rule (a)-(c) in
+# writing-rules.md). Attribution phrases are protected on other speakers' views;
+# dropping one that only prefaced the author's own view is correct (ADVISORY).
 # Extend per project with source-specific hedges or attribution phrases.
 PROTECTED = [
     "perhaps", "probably", "possibly", "seemingly", "apparently", "tended to",
@@ -51,7 +53,8 @@ PROTECTED = [
 ]
 # Markers whose sense varies; a drop is reported with a reminder to check it.
 ADVISORY = {
-    "according to": "'according to X' is attribution; 'according to <measure>' is not",
+    "according to": "'according to X' is attribution; 'according to <measure>' is not; "
+                    "dropping it is right if it only prefaced the author's own view",
     "while": "'while' may be temporal rather than concessive",
     "yet": "'yet' may mean 'so far' rather than a contrast",
     "in his view": "dropping it is right if it only prefaced the author's own view",

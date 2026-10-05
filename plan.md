@@ -21,7 +21,7 @@ Report what each source argues. Do not endorse, refute, fact-check, or add outsi
 
 ## Agents
 
-The default setup uses **Claude Sonnet 5.5 (`claude-sonnet-5-5`) at high effort for the summarizer** and **Claude Opus 5.5 (`claude-opus-5-5`) for every other role**: reviewer, merge and transition reviewer, whole-document reviewer, verifier, and later-pass agents. The coordinator is a Claude Code session (desktop app) that dispatches each agent as a subagent with the Agent tool. Summarizers use the `summarizer` agent type (`.claude/agents/summarizer.md`, which sets `model: claude-sonnet-5-5` and `effort: high`), because the Agent tool cannot set effort per call. All other roles are dispatched with `model: "opus"`. The coordinator can therefore watch every agent directly: it receives each agent's completion report, can message a running agent, and reads the plan's usage windows itself. The coordinator still checks every output file and review record before it changes a status.
+The pipeline uses **Claude Sonnet 5.5 (`claude-sonnet-5-5`) at high effort for the summarizer** and **Claude Opus 5.5 (`claude-opus-5-5`) for every other role**: reviewer, merge and transition reviewer, whole-document reviewer, verifier, and later-pass agents. The coordinator is a Claude Code session (desktop app) that dispatches each agent as a subagent with the Agent tool. Summarizers use the `summarizer` agent type (`.claude/agents/summarizer.md`, which sets `model: claude-sonnet-5-5` and `effort: high`), because the Agent tool cannot set effort per call. All other roles are dispatched with `model: "opus"`. The coordinator can therefore watch every agent directly: it receives each agent's completion report, can message a running agent, and reads the account's usage windows itself. The coordinator still checks every output file and review record before it changes a status.
 
 Opus 5.5 in Claude Code does not silently truncate long outputs. A probe on 2026-09-26 had an Opus 5.5 subagent write 8,669 words (160 paragraphs) in a single Write call. The file was complete, with its end sentinel present, and no call was cut off or returned an error. That is several times the longest output this pipeline asks of any agent. The probe tested the harness: Claude Code imposes no cap below the model's limit. Sonnet 5.5 has the same 128K-token output limit as Opus 5.5, so the result covers the summarizer too, and no output-cap probe is needed.
 
@@ -45,7 +45,7 @@ These shaped the rest of this plan. Read them before the pilot.
 | 1 | `Sources/<file>` | PDF | | | 0.40 | |
 | 2 | `Sources/<file>` | EPUB | | | 0.40 | |
 
-The naming convention is how the summaries refer to each author: the name form ("Penhale", "the authors" for a co-written book), and the pronoun the source uses for the author, or "no pronoun" when the source never genders the author. Never infer a pronoun from a name. For an interview collection, give the interviewer and each interviewee. Settle it in Preflight, with the user if the source is unclear. Every prompt carries it as `AUTHOR`, and it always comes with the naming rule.
+The naming convention is how the summaries refer to each author: the name form ("Penhale", "the authors" for a co-written book), and the pronoun the source uses for the author, or "no pronoun" when the source never genders the author. Never infer a pronoun from a name. For an interview collection, say whose voice each unit is in (normally the interviewee) and name the interviewer as another speaker, each with a pronoun or "no pronoun". Settle it in Preflight, with the user if the source is unclear. Every prompt carries it as `AUTHOR`, and it always comes with the naming rule.
 
 For each PDF, check whether the text layer is usable. Run OCR on scanned PDFs and on the scanned pages of mixed PDFs. Text extraction can miss figures, tables, and captions, so inspect them when they support substantive claims. When a PDF's text layer is damaged (ligatures mapped to wrong characters, missing spaces) and an EPUB of the same edition exists, extract from the EPUB. Confirm titles and authors from the title page, not PDF metadata.
 
@@ -60,7 +60,7 @@ Work/
   check_parts.py                    checks source reconstruction, boundaries, sizes, and counts
   make_review_queue.py              builds the review queue from the parts manifest
   check_words.py                    checks summary word counts against budgets
-  check_author_refs.py              flags paragraphs that refer to the author more than once
+  check_author_refs.py              flags paragraphs that refer to the same author or speaker more than once
   author_refs.json                  name forms per source and unit for check_author_refs.py
   count_words.py                    shared counting function and single-file word-count command
   common.py                         shared paths, frontmatter parsing, and owned-text markers
@@ -166,9 +166,9 @@ Repeat the table for each source, then give the grand total and overall ratio.
 - Inspect each source's quality, layout, chapter structure, notes, figures, and tables.
 - Confirm that the project scripts and their configuration entries exist. Fill in the per-source configuration in `Work/extract.py`, the `PARTS` and `INTRO` configuration in `Work/assemble.py`, and `TITLE` in `Work/build_pdf.py` (also used by `Work/build_epub.py`). Check that `Work/split_parts.py`, `Work/check_parts.py`, `Work/make_review_queue.py`, and `Work/check_words.py` work with this project's budget tables and unit keys. Run the tests: `python -m unittest discover -s Work/tests`.
 - Confirm the dependencies for extraction, OCR if needed, Markdown, templating, and PDF rendering. Install `requirements.txt` and record versions, executable paths, and any installations required, including Microsoft Edge for PDF rendering, in the Preflight section of `Work/checks.md`.
-- Confirm the shared writing rules at `writing-rules.md` are present, and pass them as the shared instructions for every agent. They are the only style guide agents use: their style section is guidance toward clear prose, not a checklist.
+- Confirm the shared writing rules at `writing-rules.md` are present, and pass them as the shared instructions for every agent. They are the only style guide agents use. Their Style section has fixed Requirements and judgment-based Guidance: a Guidance pattern yields where applying it would make a passage harder to read.
 - **Agent limits.** Record each role's model, context window, and effective per-request output cap, and the file-size limits for agent inputs: a 29KB body-text target and a 32KB hard cap per assigned chapter or part source file (1KB = 1,000 bytes). Larger source files caused agent timeouts even when they fit the context window. For each task, estimate the full input and required output: instructions, source, any summary under review, and a safety margin.
-- **Usage.** If the account has a usage window, record how it is read and the level at which the user stops. The default stopping level is 95% of the 5-hour window; with the default setup's subagents it takes a lot of work to fill the window, so the margin can be small. Use a different level if the user sets one. In the Claude Code desktop app the coordinator can read the plan's 5-hour and weekly windows itself (the session-management usage tool), so it can check before each batch without asking. Measure cost per task in the pilot.
+- **Usage.** If the account has a usage window, record how it is read and the level at which the user stops. The default stopping level is 95% of the 5-hour window; with Claude Code subagents it takes a lot of work to fill the window, so the margin can be small. Use a different level if the user sets one. In the Claude Code desktop app the coordinator can read the account's 5-hour and weekly windows itself (the session-management usage tool), so it can check before each batch without asking. Measure cost per task in the pilot.
 - **Naming convention.** Fill in the Naming convention column of the Sources table, and `Work/author_refs.json` (format in `Work/check_author_refs.py`): every name form the summaries will use for each author, `<slug>/<file stem>` entries for interviewees and for essay authors in an edited collection, and `not_author` phrases for other people who share an author's surname. Test `python Work/check_author_refs.py <file>` and use it as `{AUTHOR_CHECK_COMMAND}` in prompts.
 - **Word count command.** Test `python Work/count_words.py <file>` from the project root, then use that tested invocation as `{WORD_COUNT_COMMAND}` in prompts, including the executable path if `python` is not on PATH.
 - Pick a pilot chapter complex enough to exercise extraction, splitting, and review: a chapter that will be split into parts is best.
@@ -240,7 +240,7 @@ Get the user's approval of the finished pilot unless they have already authorize
 
 ### 5. Summarization
 
-Run one agent per part, or per chapter if the chapter was not split, with the Summarizer prompt in `prompts.md`. Each agent writes a draft to `Work/Drafts/{slug}/` (part drafts go in `Work/Drafts/{slug}/parts/`). Run at most 6 agents at once. Raise that number only after clean batches and within provider and usage limits. List the next pending units with `python Work/set_status.py pending`.
+Run one agent per part, or per chapter if the chapter was not split, with the Summarizer prompt in `prompts.md`. Each agent writes a draft to `Work/Drafts/{slug}/` (part drafts go in `Work/Drafts/{slug}/parts/`). Run at most 6 agents at once. Raise that number only after clean batches and within usage limits. List the next pending units with `python Work/set_status.py pending`.
 
 Part drafts are prose with no headings; the merge adds the chapter heading. Unsplit chapter drafts start with `## {Chapter Title}`.
 
@@ -281,7 +281,7 @@ By default, merge with `python Work/merge_chapters.py`. It concatenates each rea
 
 You can use a single merge agent instead when the combined reviewed part summaries are 32KB or less in UTF-8 bytes and the full task, including instructions and output, fits the model's limits with a safety margin. If a merge agent stalls, switch to the script and separate transition reviews. The merge agent reads the reviewed part summaries in order and does not read the chapter source.
 
-Either way, the merge keeps the parts in order, smooths abrupt transitions at part boundaries, and removes duplicated framing, without adding or dropping substantive claims. The total should stay within the chapter budget and tolerance. If accuracy requires a deviation, record it and the reason. Before the merged chapter is accepted, you or a fresh-context agent must check every edited transition against the original passages. Run `python Work/check_author_refs.py` on the merged file, because two parts that each open with the author's name can put two references in one paragraph at the seam. Then check the merged file against the parts manifest: each part appears exactly once and in order, and the chapter is within budget or has a documented, justified deviation. Accept it with `python Work/set_status.py chapter accepted <slug> <unit_id>`.
+Either way, the merge keeps the parts in order, smooths abrupt transitions at part boundaries, and removes duplicated framing, without adding or dropping substantive claims. The total should stay within the chapter budget and tolerance. If accuracy requires a deviation, record it and the reason. Before the merged chapter is accepted, you or a fresh-context agent must check every edited transition against the original passages. Run `python Work/check_author_refs.py` on the merged file, because seam edits can join paragraphs or leave a part re-introducing the author. Then check the merged file against the parts manifest: each part appears exactly once and in order, and the chapter is within budget or has a documented, justified deviation. Accept it with `python Work/set_status.py chapter accepted <slug> <unit_id>`.
 
 After merging, `Work/Summaries/{slug}/parts/` is stale: later edits go to the canonical chapter summary only.
 
@@ -312,7 +312,7 @@ Optionally build `Summary.epub` with `python Work/build_epub.py` (requires `eboo
 
 ### 10. Independent Verification
 
-Once all chapters are accepted, run the verification pass in `passes/verification-pass.md`: a report-only check of a sample of chapters by a stronger model than the one that drafted them, triage, a scope decision with the user, and remediation rounds under the preservation rule. Copy the brief to the project root and keep its status tables there. Skip it only if the strongest available model drafted and reviewed every chapter under the current prompts and the user agrees; record the decision. Under the default setup Sonnet 5.5 drafts, so that condition is not met and the pass runs by default; skipping it is the user's call, and the decision is recorded. The verifiers are fresh-context Opus 5.5 agents that never saw the chapters they check.
+Once all chapters are accepted, run the verification pass in `passes/verification-pass.md`: a report-only check of a sample of chapters by Opus 5.5, a stronger model than the Sonnet 5.5 that drafted them, triage, a scope decision with the user, and remediation rounds under the preservation rule. Copy the brief to the project root and keep its status tables there. Because Sonnet 5.5 drafts, the pass runs by default; skip it only if the user decides to, and record the decision. The verifiers are fresh-context Opus 5.5 agents that never saw the chapters they check.
 
 After remediation, update the Final words and deviation columns in the budget tables, reassemble, rebuild the PDF, and record the pass in `Work/checks.md`.
 
@@ -334,7 +334,7 @@ Passes used in earlier runs, in order:
 ## Operations
 
 - **Handoff.** Keep a Project Status section at the end of this plan current: what is complete, the next pending units, decisions and gotchas, and the commands in use. A new session should be able to resume from it and `Work/checks.md` alone. Each pass brief keeps its own cold-start handoff.
-- **Usage.** Where the account has a usage window, check the current reading before each batch in a costly pass (read it yourself in Claude Code, or ask the user), never start a batch that could cross their stopping point, and log readings in the pass brief.
+- **Usage.** Where the account has a usage window, check the current reading before each batch in a costly pass (read it yourself with the session-management usage tool), never start a batch that could cross their stopping point, and log readings in the pass brief.
 - **Commits.** Commit after each batch with the pass name and progress count ("{pass}: {source} ch-03 to ch-08 (24 of 90)"), and after each rebuild.
 - **Parallel agents.** Tell agents that others are editing other files in parallel and to ignore those changes in git status.
 - **Settled decisions.** When the user settles a recurring question (spelling variants, `%` against "percent", quote style), record it in the relevant brief so agents stop raising it.
@@ -343,7 +343,7 @@ Passes used in earlier runs, in order:
 
 - Every substantive unit is accounted for, and scope exclusions are documented.
 - Extraction and chapter boundaries are validated for accepted units, and uncertain repairs are reviewed. Units with unresolved material ambiguities stay blocked.
-- Every chapter or part source file given to a summarizer or reviewer, including transition-review excerpts, is at or under the 32KB hard cap, and part boundaries are sentence-aligned and validated. Drafts, summaries, and shared instructions are checked against full-task context and output limits instead of this cap. Single-agent merges meet the 32KB combined-summary limit in Section 7.
+- Every chapter or part source file given to a summarizer or reviewer, including transition-review excerpts, is at or under the 32KB hard cap, and part boundaries are sentence-aligned and validated. Drafts, summaries, and shared instructions are checked against full-task context and output limits instead of this cap. Single-agent merges meet the 32KB combined-summary limit in Step 7.
 - The ordered owned source slices rebuild each validated chapter exactly. Generated metadata and context copies are excluded from reconstruction, and metadata, page markers, and context copies are excluded from source word counts.
 - Part statuses are recorded, and no accepted chapter contains a blocked or unreviewed part.
 - Original drafts, review records, and pre-pass snapshots are preserved.
@@ -360,8 +360,8 @@ Passes used in earlier runs, in order:
 
 ## Status
 
-- [ ] Sources, scope, dependencies, style instructions, and each author's naming convention recorded
-- [ ] Agent models recorded (default: Sonnet 5.5 at high effort for the summarizer, Opus 5.5 in every other role); usage limits recorded
+- [ ] Sources, scope, and dependencies recorded; writing rules confirmed present; each author's naming convention recorded
+- [ ] Agent models recorded (Sonnet 5.5 at high effort for the summarizer, Opus 5.5 in every other role); usage limits recorded
 - [ ] Page mappings and chapter segmentation confirmed
 - [ ] Raw extraction preserved, uncertain repairs reviewed, and cleaned output validated
 - [ ] Word budgets and context-size checks completed
