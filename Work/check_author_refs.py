@@ -45,7 +45,12 @@ CONFIG = ROOT / "Work" / "author_refs.json"
 # }
 # "refs" maps a source slug to every form the summaries use for its author,
 # and "<slug>/<file stem>" to a unit's other main speakers (interviewees, or
-# an essay's author in an edited collection). A list of names is one person;
+# an essay's author in an edited collection). The FIRST name group of a unit
+# entry is that unit's narrative voice (Work/check_style_pass.py treats it as
+# the author, and every other name, the source's author included, as another
+# speaker): in the example, Marlow is the voice of unit 03 and Penhale, the
+# interviewer, is another speaker. A unit whose voice is the source's author
+# has no entry of its own, or lists the author first. A list of names is one person;
 # a list of lists is several people, each counted on their own. Part
 # suffixes ("-part1-of-2") are ignored when matching file stems. The longest
 # form matches first, so a full name and a surname are not double-counted.

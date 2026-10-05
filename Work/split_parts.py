@@ -63,7 +63,10 @@ OVERLAP_END = "<!-- end overlap context -->"
 # boundary separates a term from its definition, a claim from its evidence,
 # and so on. Kept out of the part files so a rerun never loses it. Each entry:
 #   {"source_slug": ..., "unit_id": ..., "part_index": 2, "part_count": 3,
-#    "text": "exact chapter text", "reason": "optional note"}
+#    "text": "exact chapter text", "reason": "optional note", "fold": false}
+# "fold": true marks a note from the chapter's notes block given to the part
+# that holds its reference number: its block tells that part to fold the note
+# in rather than only use it for reference.
 # The text must appear verbatim in the chapter body. The splitter finds the
 # part that owns it and places it before the owned text (earlier parts) or
 # after it (later parts). Entries whose part_index/part_count no longer exist
@@ -71,6 +74,11 @@ OVERLAP_END = "<!-- end overlap context -->"
 CONTEXT_CONFIG = ROOT / "Work" / "part_context.json"
 CONTEXT_START = "<!-- context from {owner}, owned there: use for reference only, do not summarize it, excluded from word_count and word_budget -->"
 CONTEXT_END = "<!-- end context -->"
+# A note from the chapter's notes block, given to the part that holds its
+# reference number (entry key "fold": true). That part folds it in. The same
+# "context from" prefix keeps check_parts.py's CONTEXT_RE matching it.
+NOTE_CONTEXT_START = ("<!-- context from {owner}, a note owned there: fold its substance in where its "
+                      "number appears in the owned text, excluded from word_count and word_budget -->")
 
 SCRIPT_BLOCK_REASON = "part over hard cap"
 ABBREVIATIONS = {
@@ -261,8 +269,9 @@ def overlap_blocks(body, prev_span, count, min_words=0):
     return [body[a:b].strip() for a, b in spans[-take:]]
 
 
-def context_block(owner, text):
-    return CONTEXT_START.format(owner=owner) + "\n\n" + text + "\n\n" + CONTEXT_END
+def context_block(owner, text, fold=False):
+    start = NOTE_CONTEXT_START if fold else CONTEXT_START
+    return start.format(owner=owner) + "\n\n" + text + "\n\n" + CONTEXT_END
 
 
 def render_part(fields, heading, overlap, owned, before=(), after=()):
@@ -271,8 +280,8 @@ def render_part(fields, heading, overlap, owned, before=(), after=()):
     context = ""
     if overlap:
         context = OVERLAP_START + "\n\n" + "\n\n".join(overlap) + "\n\n" + OVERLAP_END + "\n\n"
-    context += "".join(context_block(o, t) + "\n\n" for o, t in before)
-    tail = "".join("\n\n" + context_block(o, t) for o, t in after)
+    context += "".join(context_block(o, t, f) + "\n\n" for o, t, f in before)
+    tail = "".join("\n\n" + context_block(o, t, f) for o, t, f in after)
     return head + context + OWNED_START + owned + OWNED_END + tail + "\n"
 
 
@@ -314,7 +323,7 @@ def place_context(entries, body, spans, k, unit, notes):
             notes.append(f"part {k}: context text overlaps this part's own text, not added: {text[:60]!r}")
             continue
         label = f"{unit} part {owners[0]}" if len(owners) == 1 else f"{unit} parts {owners[0]}-{owners[-1]}"
-        (before if owners[-1] < k else after).append((label, text.strip()))
+        (before if owners[-1] < k else after).append((label, text.strip(), bool(e.get("fold"))))
     return before, after
 
 
@@ -465,7 +474,7 @@ def main():
                     "record": f"Work/Reviews/{slug}/parts/{pname}",
                     "words": w, "budget": share, "ceiling": review_ceiling(share, w), "bytes": len(data),
                     "sha": sha(data), "status": status,
-                    "context_from": [o for o, _ in before + after],
+                    "context_from": [o for o, _, _ in before + after],
                 })
 
         # Remove part files left over from an earlier split of this chapter.
@@ -506,7 +515,9 @@ def main():
             "summary": summary,
             "words": ch["words"],
             "budget": budget,
-            "ceiling": review_ceiling(budget, ch["words"]),
+            # The sum of the part ceilings, so a merged chapter never shows over
+            # its ceiling while every part is within its own (rounding).
+            "ceiling": sum(u["ceiling"] for u in units),
             "part_count": len(units),
             "status": status,
             "blocked_reason": SCRIPT_BLOCK_REASON if script_blocked else None,
@@ -520,7 +531,7 @@ def main():
         maxb = max(u["bytes"] for u in units)
         report.append(
             f"{slug}/{unit} ({path.name}): {len(units)} part(s), {ch['words']} words, "
-            f"budget {budget} (ceiling {review_ceiling(budget, ch['words'])}), largest file {maxb} bytes, "
+            f"budget {budget} (ceiling {parts_manifest[-1]['ceiling']}), largest file {maxb} bytes, "
             f"status {status}"
         )
         report.extend("  !! " + n for n in notes)

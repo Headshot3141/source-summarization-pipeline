@@ -14,8 +14,10 @@ Reported items usually fall into these groups. Name the groups this pass covers:
 
 - **Compression loss.** The summary dropped the antecedent that made a sentence work: a pronoun whose referent was cut, "the letter" when no letter was introduced, a verb whose object went missing. Each statement can be accurate while the sentence fails.
 - **Dropped qualifier.** A hedge, counterfactual, estimate marker, scope word ("some", "most", "only", "further"), or intensity marker ("even") the source has and the summary lost. "Some members" and "members" are different claims.
+- **Dropped frame.** A hypothetical, a position taken up for argument's sake, irony, an open question, or a view the author later dropped, stated in the summary as the author's assertion (rule (f)).
 - **Lost precision.** A date or figure narrowed or blurred ("1924" for "December 1924").
-- **Altered claim.** An added causal "so", an aim turned into an outcome, a misplaced "Yet", a stronger or weaker verb, a changed actor.
+- **Altered claim.** An added causal "so", an aim turned into an outcome, a misplaced "Yet", a stronger or weaker verb, a changed actor, a dropped condition, "not all" made "none", "one of the largest" made "the largest", or two events set side by side so they imply an order or cause the source does not give (rule (g)).
+- **Order and structure.** A passage moved out of the source's order, or structure the source lacks: an overview, a closing summary, or an added heading.
 - **Attribution and quotation.** A source quotation printed without quotation marks, a quotation whose wording differs from the source, a block quotation (`> ` in the source) paraphrased, condensed, or partially quoted instead of reproduced whole or dropped, or the author's voice assigned to someone else.
 - **Possible divergence or inversion.** A name, date, figure, or sequence that may not match the source.
 - **Omitted content.** A clause or sentence the summary left out.
@@ -26,8 +28,8 @@ Reported items usually fall into these groups. Name the groups this pass covers:
 
 When the list is long, rank it and agree with the user which tiers to act on:
 
-- **Tier 1: the summary states something the source does not.** A figure not in the source, the author's argument assigned to opponents, the wrong actor or evidence, a causal link the source lacks, a hedged thesis stated as certain, or a claim widened beyond the source's scope.
-- **Tier 2: a lost contrast, hedge, scope word, or attribution marker** that changes a claim's strength, a source quotation printed without quotation marks, or a block quotation paraphrased or partially quoted.
+- **Tier 1: the summary states something the source does not.** A hypothetical, open question, ironic or abandoned view stated as the author's assertion; "not all" made "none"; a condition dropped; an order or cause implied that the source does not give; a figure not in the source, the author's argument assigned to opponents, the wrong actor or evidence, a causal link the source lacks, a hedged thesis stated as certain, or a claim widened beyond the source's scope.
+- **Tier 2: a lost contrast, hedge, scope word, sequence or reach word, or attribution marker** that changes a claim's strength, a source quotation printed without quotation marks, or a block quotation paraphrased or partially quoted.
 - **Tier 3: minor intensity and precision items.**
 
 List items in source and chapter order so one agent handles all of a chapter's items together; work Tier 1 first where a batch cannot hold everything.
@@ -48,7 +50,7 @@ The project reproduces each source as printed. Many reports are written from gen
 
 A summary leaves out about half of its source by design. Qualifiers are different from omissions.
 
-- Dropped qualifiers, lost precision, altered claims, attribution, quotations, and spelling: restore or correct. The summary currently states something the source does not.
+- Dropped qualifiers, dropped frames, lost precision, altered claims, order and structure, attribution, quotations, and spelling: restore or correct. The summary currently states something the source does not.
 - Omitted content: restore only if leaving it out makes a sentence the summary does contain misleading or unsupported, for example the source's qualification of a claim the summary makes, or its explanation of an outcome the summary reports. If the surviving statements stand accurately on their own, the disposition is `declined`, with the reason. Do not restore content only because it is interesting.
 - Where the source itself is ambiguous about a referent, restore the source's own words ("this approach") and do not choose a referent.
 
@@ -68,11 +70,11 @@ A summary leaves out about half of its source by design. Qualifiers are differen
 
 These are absolute. An edit that breaks one is a defect, however good the result looks.
 
-1. **Change only what an item requires.** Edit the sentence named in the item and, if the fix needs it, the sentence next to it. No other editing, no style improvements elsewhere, and no fixes for problems nobody reported. A new problem goes in the record under New reports, and the text is not changed.
+1. **Change only what an item requires.** Edit the sentence named in the item and, if the fix needs it, the sentence next to it (for an order or structure item, the paragraph that rule 5 allows). No other editing, no style improvements elsewhere, and no fixes for problems nobody reported. A new problem goes in the record under New reports, and the text is not changed.
 2. **Use only the chapter source.** Every word restored or added comes from what the source says at that point, in as few words as the source allows. Ordinary connecting words needed for grammar are allowed; new claims, causal links, and referents are not.
 3. **The preservation rule in `writing-rules.md` is binding** and outranks everything except fidelity. Keep a reversal attached to the right scope. Match hedges to the source's strength. If the source's own figures do not add up, the disposition is `faithful`. Never compute a figure.
 4. **Quotations** match the source exactly, including capitals; change one only to match, and record the before and after. Where the source uses single quotation marks and the summaries use double, keep the summaries' convention. Unquoted first-person source speech is either quoted exactly or recast as indirect speech.
-5. **Structure.** Keep `##` and `###` heading text exactly and paragraph breaks where they are. A sentence may move only within its paragraph, and only where an item reports that its order departs from the source.
+5. **Structure.** Keep `##` and `###` heading text exactly and paragraph breaks where they are, with one exception: where an item reports that the summary departs from the source's order or adds structure the source lacks, move the paragraph back to the source's position or delete the invented framing (an overview, a closing summary, an added heading), and record each move with the source passages that set the order. A sentence may move only within its paragraph, and only where an item reports that its order departs from the source.
 6. **Length.** Restorations run longer, and that is expected. The coordinator keeps the document at or under 0.55 of its source with `check_words.py`.
 7. **Style.** New or rewritten text follows `writing-rules.md`. Style never overrides the rules above.
 8. **Spelling.** Names follow the source's spelling. A spelling inconsistent within one summary is fixed to the source's spelling for that chapter; if the source itself is inconsistent, the disposition is `faithful`. Where the source spelling is an evident extraction artifact, reproduce the author's form as far as the extraction shows it, and say so in the record.
@@ -83,7 +85,7 @@ These are absolute. An edit that breaks one is a defect, however good the result
 | What | Path |
 |---|---|
 | Summary to edit | `Work/Summaries/{slug}/{NN}-{name}.md` |
-| Chapter source, read-only | `Work/Chapters/{slug}/{NN}-{name}.md` (validated extraction with `<!-- page N -->` markers) |
+| Chapter source, read-only | `Work/Chapters/{slug}/{NN}-{name}.md` (validated extraction, with `<!-- page N -->` markers where the export has page breaks) |
 | Earlier text, read-only, optional | `Work/Summaries_pre{earlier-pass}/{slug}/{NN}-{name}.md` (shows whether an earlier pass introduced the problem) |
 | Record | `Work/Reviews/{slug}/{pass-name}/{NN}-{name}.md` |
 | Writing rules | `writing-rules.md` |
@@ -99,7 +101,7 @@ Edits applied: N
 
 ## {ITEM-ID}
 Disposition: fixed | restored | clarified | faithful | declined | not a defect | unresolved
-Source: <!-- page N -->, "short exact excerpt from the chapter source"
+Source: <!-- page N --> where SOURCE has page markers, and "a short exact excerpt from the chapter source"
 Before: exact summary text (omit if unchanged)
 After: exact summary text (omit if unchanged)
 Reason: one or two sentences.
@@ -151,15 +153,18 @@ source, leave it alone, even if the source is factually wrong.
 Absolute constraints, from BRIEF:
 - Change only what an item requires. Report anything else; do not fix it.
 - Anything restored or added comes from the source at that point.
-- Contrast reversals, hedges, scope words, attribution markers on other
-  speakers' views, and claim-evidence pairs survive every edit, at the
-  source's strength.
+- Contrast reversals, hedges, scope words, conditions, negation scope,
+  sequence and reach words, frames on hypotheticals, irony, and questions,
+  attribution markers on other speakers' views, and claim-evidence pairs
+  survive every edit, at the source's strength.
 - Numbers and quotations change only to match the source exactly. Never
   compute a figure.
 - Restore a missing marker only on another speaker's view (the naming
   rule in WRITING RULES). Do not add the author's name, "the author", or
   a pronoun to the author's own claims: the summary states them directly.
-- Keep ## and ### heading text and paragraph breaks.
+- Keep ## and ### heading text and paragraph breaks, except to repair an
+  item that reports invented structure or a departure from the source's
+  order (BRIEF, rule 5).
 - Targeted string replacements only. Edit only SUMMARY and RECORD.
 
 After your last edit, run AUTHOR CHECK COMMAND on SUMMARY and recast any
@@ -185,9 +190,9 @@ For an agent handling several short chapters (group them so each agent has about
 
 1. Diff each chapter against its snapshot (`git diff --no-index --word-diff=plain Work/Summaries_pre{pass}/{slug}/{file} Work/Summaries/{slug}/{file}`). Every hunk maps to an item in the record. Revert unexplained hunks.
 2. Search the chapter source for every added phrase. Agents in earlier runs added words the source lacks ("historians", "onward"), dropped a phrase while restoring a clause, stretched a source phrase over more referents than it covers, and computed figures. Where an agent supplied a connecting verb, confirm it adds no claim.
-3. For every changed number, date, name, or quotation, open the source at the cited page marker and confirm the new text matches.
+3. For every changed number, date, name, or quotation, open the source at the cited page marker or quoted passage and confirm the new text matches.
 4. Spot-check `faithful`, `declined`, and `not a defect` dispositions against the source, especially items reported as likely errors.
-5. Run `python Work/check_fidelity.py` on the batch's chapters and `python Work/check_words.py`. A remaining fidelity flag in an edited passage is checked against the source; the document ratio stays at or under 0.55. Run `{AUTHOR_CHECK_COMMAND}` on the batch's files. Any paragraph it still flags must appear in the record's Author naming section with the other speaker that justifies it.
+5. Run `{FIDELITY_CHECK_COMMAND}` (`<summary> <source>`) for each of the batch's chapters and `python Work/check_words.py`. A remaining fidelity flag in an edited passage is checked against the source; the document ratio stays at or under 0.55. Run `{AUTHOR_CHECK_COMMAND}` on the batch's files. Any paragraph it still flags must appear in the record's Author naming section with the other speaker that justifies it.
 6. Update each item's Status cell (for example `restored (a, c); declined (b)`), log new reports, and commit the batch as "{Pass name}: {source} ch-NN to ch-NN (N of TOTAL)".
 
 **Final steps.** `python Work/assemble.py` and `python Work/check_words.py`. The PDF is rendered and inspected once, after the last pass (plan.md Step 12). Record the pass in `Work/checks.md`, and decide with the user whether the New reports warrant another pass.

@@ -1,7 +1,7 @@
 """Write Work/whole_doc_chunks.txt: the chunks for the whole-document review.
 
 Groups the accepted chapter summaries, in manifest order, into chunks that
-one fresh-context reviewer reads as an unfamiliar reader (plan.md Section 8).
+one fresh-context reviewer reads as an unfamiliar reader (plan.md Step 11).
 A chunk closes when adding the next chapter would pass MAX_BYTES or
 MAX_CHAPTERS. Chunks run across source boundaries on purpose, so the
 reviewers also see the transitions between parts.

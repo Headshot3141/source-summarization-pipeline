@@ -79,8 +79,8 @@ class PartContext(unittest.TestCase):
         notes = []
         entries = [{"text": "Alpha defines a term."}, {"text": "Gamma concludes."}]
         before, after = split_parts.place_context(entries, self.body, self.spans(), 2, "ch-01", notes)
-        self.assertEqual(before, [("ch-01 part 1", "Alpha defines a term.")])
-        self.assertEqual(after, [("ch-01 part 3", "Gamma concludes.")])
+        self.assertEqual(before, [("ch-01 part 1", "Alpha defines a term.", False)])
+        self.assertEqual(after, [("ch-01 part 3", "Gamma concludes.", False)])
         self.assertEqual(notes, [])
 
     def test_bad_context_is_reported_not_added(self):
@@ -93,8 +93,8 @@ class PartContext(unittest.TestCase):
     def test_rendered_context_is_found_by_checker_and_owned_text_is_exact(self):
         owned = "Beta uses it.\n\n"
         content = split_parts.render_part([("unit_id", "ch-01")], "# T", [], owned,
-                                          [("ch-01 part 1", "Alpha defines a term.")],
-                                          [("ch-01 part 3", "Gamma concludes.")])
+                                          [("ch-01 part 1", "Alpha defines a term.", False)],
+                                          [("ch-01 part 3", "Gamma concludes.", False)])
         self.assertEqual(owned_text(content), owned)
         self.assertEqual(CONTEXT_RE.findall(content), ["Alpha defines a term.", "Gamma concludes."])
         self.assertLess(content.index("Alpha"), content.index(OWNED_START))

@@ -661,3 +661,312 @@ class DoclingMarkdown(unittest.TestCase):
                     self.assertEqual(f.read(), "## War\n\nA &amp; B.\n")
             finally:
                 extract.SOURCES, extract.RAW = old
+
+    def test_list_like_footnotes_moved_and_paragraph_rejoined(self):
+        body = ("The treaty was\n\n1. Harbor Board minutes, 1921.\n\n* Not in the first edition.\n\n"
+                "<!-- page break -->\n\nsigned in 1919.\n")
+        paras, log = self.one(body, footnote_pattern=r"^(?:\d{1,3}\.|\*)\s")
+        self.assertEqual(paras, [
+            "<!-- page 1 -->\nThe treaty was <!-- page 2 --> signed in 1919.",
+            extract.FOOTNOTES_LABEL,
+            "<!-- footnote on page 1 -->\n1. Harbor Board minutes, 1921.",
+            "<!-- footnote on page 1 -->\n* Not in the first edition.",
+        ])
+        self.assertEqual(log.kinds().count("footnote-moved-from-list"), 2)
+        self.assertNotIn("footnote-moved", log.kinds())
+        self.assertIn("page-break-joined", log.kinds())
+
+    def test_list_block_of_several_footnotes_split_and_moved(self):
+        body = "The treaty was\n\n1. Harbor Board minutes.\n2. Second note.\n\n<!-- page break -->\n\nsigned in 1919.\n"
+        paras, log = self.one(body, footnote_pattern=r"^\d{1,3}\.?\s")
+        self.assertEqual(paras, [
+            "<!-- page 1 -->\nThe treaty was <!-- page 2 --> signed in 1919.",
+            extract.FOOTNOTES_LABEL,
+            "<!-- footnote on page 1 -->\n1. Harbor Board minutes.",
+            "<!-- footnote on page 1 -->\n2. Second note.",
+        ])
+        self.assertEqual(log.kinds().count("footnote-moved-from-list"), 2)
+        self.assertIn("page-break-joined", log.kinds())
+
+    def test_page_end_list_like_a_footnote_but_not_the_pattern_is_a_candidate(self):
+        body ="The treaty was signed.\n\n1. Harbor Board minutes.\n2. Second note.\n\n<!-- page break -->\n\nNext page.\n"
+        paras, log = self.one(body, footnote_pattern=r"^\d{1,3}\s")
+        self.assertIn("1. Harbor Board minutes.\n2. Second note.", paras)
+        self.assertEqual(log.kinds().count("footnote-candidate"), 1)
+
+    def test_body_list_at_page_end_is_not_taken_for_footnotes(self):
+        fpat = r"^\d{1,3}\.?\s"
+        body = ("The board set three rules:\n\n1. Every ship registers by May.\n\n<!-- page break -->\n\n"
+                "2. Every ship pays its dues.\n3. Every ship flies the flag.\n")
+        paras, log = self.one(body, footnote_pattern=fpat)
+        self.assertNotIn(extract.FOOTNOTES_LABEL, paras)
+        self.assertIn("1. Every ship registers by May.", paras)
+        self.assertNotIn("footnote-moved-from-list", log.kinds())
+        self.assertEqual(log.kinds().count("footnote-candidate"), 2)
+        # No colon lead-in: the next page's list continuing the numbering is enough.
+        body = ("The board set rules.\n\n1. Every ship registers by May.\n\n<!-- page break -->\n\n"
+                "2. Every ship pays its dues.\n\nThe rules held.\n")
+        paras, log = self.one(body, footnote_pattern=fpat)
+        self.assertNotIn(extract.FOOTNOTES_LABEL, paras)
+        # A colon lead-in alone keeps a bulleted item too.
+        paras, _ = self.one("The rule was:\n\n- Ships register.\n\n<!-- page break -->\n\nNext.\n",
+                            footnote_pattern=r"^(?:\d{1,3}\.|-)\s")
+        self.assertNotIn(extract.FOOTNOTES_LABEL, paras)
+
+    def test_interruptions_within_a_page_are_joined_or_logged(self):
+        # list, moved footnote, lowercase paragraph: no page breaks, then footnotes_at_page_end False
+        body = "Rules:\n\n- arrive on time and\n\n12 A note.\n\nleave early.\n"
+        paras, log = self.one(body, footnote_pattern=r"^\d{1,3}\s")
+        self.assertEqual(paras, ["Rules:", "- arrive on time and leave early.", extract.FOOTNOTES_LABEL, "12 A note."])
+        self.assertIn("list-page-joined", log.kinds())
+        paras, log = self.one(body + "\n<!-- page break -->\n\nNext.\n", footnote_pattern=r"^\d{1,3}\s",
+                              footnotes_at_page_end=False)
+        self.assertEqual(paras[1], "- arrive on time and leave early.")
+        # list, image, lowercase paragraph on the same page
+        paras, log = self.one("Rules:\n\n- arrive on time and\n\n<!-- image -->\n\nleave early.\n\n"
+                              "<!-- page break -->\n\nNext.\n")
+        self.assertEqual(paras[1], "- arrive on time and leave early.")
+        self.assertIn("list-page-joined", log.kinds())
+        # open-ended paragraph, table, continuation on the same page: logged, not joined
+        paras, log = self.one("The treaty was\n\n| a | b |\n|---|---|\n\nsigned in 1919.\n\n<!-- page break -->\n\nNext.\n")
+        self.assertEqual(paras[:3], ["<!-- page 1 -->\nThe treaty was", "| a | b |\n|---|---|", "signed in 1919."])
+        self.assertEqual(log.kinds().count("block-unjoined"), 1)
+        self.assertNotIn("page-break-unjoined", log.kinds())
+        # open-ended paragraph or heading-like line, image, then a capital or a list on the same page
+        _, log = self.one("The treaty was\n\n<!-- image -->\n\nSigned in 1919.\n\n<!-- page break -->\n\nNext.\n")
+        self.assertEqual(log.kinds().count("block-unjoined"), 1)
+        self.assertNotIn("page-break-unjoined", log.kinds())
+        _, log =self.one("The rules were\n\n<!-- image -->\n\n- arrive on time\n\n<!-- page break -->\n\nNext.\n")
+        self.assertEqual(log.kinds().count("block-unjoined"), 1)
+        _, log = self.one("Table 1 Counts\n\n| a | b |\n|---|---|\n\nAfter.\n")
+        self.assertNotIn("block-unjoined", log.kinds())
+        self.assertNotIn("page-break-unjoined", log.kinds())
+
+    def test_list_item_run_on_with_nothing_between_is_joined(self):
+        # No page breaks: a list item split across a page looks like this.
+        paras, log = self.one("Rules:\n\n- arrive on time and\n\nleave early.\n")
+        self.assertEqual(paras, ["Rules:", "- arrive on time and leave early."])
+        self.assertEqual(log.kinds().count("list-page-joined"), 1)
+        # With page breaks, on the same page.
+        paras, log = self.one("Rules:\n\n- arrive on time and\n\nleave early.\n\n<!-- page break -->\n\nNext.\n")
+        self.assertEqual(paras[1], "- arrive on time and leave early.")
+        self.assertIn("list-page-joined", log.kinds())
+        # A capital is not joined; with no page breaks it is logged as a paragraph pair would be.
+        paras, log = self.one("Rules:\n\n- arrive on time and\n\nLeave early.\n")
+        self.assertEqual(paras, ["Rules:", "- arrive on time and", "Leave early."])
+        rows = [r[3] for r in log.rows if r[2] == "page-break-unjoined"]
+        self.assertEqual(len(rows), 1)
+        self.assertIn("no page evidence", rows[0])
+        _, log = self.one("Rules:\n\n- arrive on time and\n\nLeave early.\n\n<!-- page break -->\n\nNext.\n")
+        self.assertNotIn("page-break-unjoined", log.kinds())
+        self.assertNotIn("block-unjoined", log.kinds())
+        # No page breaks: an open-ended paragraph before a quotation is logged too,
+        # but not a lead-in before a list or a heading-like line before a table.
+        _, log = self.one("In a long letter to her sister that winter she wrote that\n\n> the tide came in.\n")
+        self.assertEqual(log.kinds().count("page-break-unjoined"), 1)
+        for body in ["The rules are\n\n- arrive on time\n", "Table 1 Counts\n\n| a | b |\n|---|---|\n",
+                     "She wrote that\n\n> the tide came in.\n",
+                     "Rules:\n\n- arrive on time.\n\nleave early.\n"]:
+            paras, log = self.one(body)
+            self.assertNotIn("page-break-unjoined", log.kinds(), body)
+            self.assertNotIn("list-page-joined", log.kinds(), body)
+
+    def test_open_ended_list_continued_on_next_page_is_body_not_footnote(self):
+        fpat = r"^\d{1,3}\.?\s"
+        body = "Three steps followed.\n\n1. the board would meet and\n\n<!-- page break -->\n\nvote on the dues.\n"
+        paras, log = self.one(body, footnote_pattern=fpat)
+        self.assertEqual(paras, ["<!-- page 1 -->\nThree steps followed.",
+                                 "1. the board would meet and <!-- page 2 --> vote on the dues."])
+        self.assertIn("list-page-joined", log.kinds())
+        self.assertNotIn("footnote-moved-from-list", log.kinds())
+        self.assertNotIn("footnote-open-ended", log.kinds())
+        self.assertEqual(log.kinds().count("footnote-candidate"), 1)
+
+    def test_open_ended_footnote_running_to_next_page_still_moves(self):
+        fpat = r"^\d{1,3}\.?\s"
+        # The next page's body starts with a capital: the note moves, flagged as open-ended.
+        body = ("The treaty was signed.\n\n1. Harbor Board minutes, see the\n\n<!-- page break -->\n\n"
+                "The next page begins.\n")
+        paras, log = self.one(body, footnote_pattern=fpat)
+        self.assertEqual(paras, ["<!-- page 1 -->\nThe treaty was signed.", "<!-- page 2 -->\nThe next page begins.",
+                                 extract.FOOTNOTES_LABEL, "<!-- footnote on page 1 -->\n1. Harbor Board minutes, see the"])
+        self.assertIn("footnote-open-ended", log.kinds())
+        self.assertNotIn("list-page-joined", log.kinds())
+        # The note interrupted a body paragraph that runs on in lowercase: the
+        # paragraph rejoins, and the note still moves.
+        body = "The treaty was\n\n1. Harbor Board minutes, see the\n\n<!-- page break -->\n\nsigned in 1919.\n"
+        paras, log = self.one(body, footnote_pattern=fpat)
+        self.assertEqual(paras, ["<!-- page 1 -->\nThe treaty was <!-- page 2 --> signed in 1919.",
+                                 extract.FOOTNOTES_LABEL, "<!-- footnote on page 1 -->\n1. Harbor Board minutes, see the"])
+        self.assertIn("footnote-open-ended", log.kinds())
+        self.assertIn("page-break-joined", log.kinds())
+        self.assertNotIn("list-page-joined", log.kinds())
+
+    def test_list_like_footnote_mid_page_stays_a_list(self):
+        body = "Body.\n\n1. A numbered line.\n\nMore body.\n\n<!-- page break -->\n\nNext.\n"
+        paras, log = self.one(body, footnote_pattern=r"^\d{1,3}\.\s")
+        self.assertEqual(paras, ["<!-- page 1 -->\nBody.", "1. A numbered line.", "More body.", "<!-- page 2 -->\nNext."])
+        self.assertIn("footnote-candidate", log.kinds())
+
+    def test_footnote_hint_on_one_item_lists_only(self):
+        _, log = self.one("Body text.\n\n1. Harbor Board minutes, 1921.\n")
+        self.assertEqual(log.kinds().count("footnote-candidate"), 1)
+        _, log = self.one("The rules are:\n\n1. Arrive on time.\n2. Leave early.\n")
+        self.assertNotIn("footnote-candidate", log.kinds())
+
+    def test_footnote_moved_without_page_breaks_is_flagged(self):
+        _, log = self.one("The treaty was\n\n12 A note.\n\nsigned in 1919.\n", footnote_pattern=r"^\d{1,3}\s")
+        self.assertIn("footnote-moved-no-page-evidence", log.kinds())
+        self.assertNotIn("footnote-moved", log.kinds())
+
+    def test_chapter_with_no_body_words_is_an_error(self):
+        md = ("## Contents\n\n## The Long War\n\n## The Peace\n\n"
+              "## The Long War\n\nWar began.\n\n## The Peace\n\nPeace came.\n")
+        chapters = [{"unit_id": "ch-01", "slug": "a", "title": "The Long War"},
+                    {"unit_id": "ch-02", "slug": "b", "title": "The Peace"}]
+        with self.assertRaises(SystemExit) as cm:
+            self.extract(md, chapters)
+        self.assertIn("ch-01", str(cm.exception))
+        self.assertIn("occurrence", str(cm.exception))
+        chapters[0]["occurrence"] = 2
+        chapters[1]["occurrence"] = 1  # counted from just after ch-01's start
+        out, _ = self.extract(md, chapters)
+        self.assertEqual(out, {"ch-01": ["War began."], "ch-02": ["Peace came."]})
+
+    def test_contents_page_numbers_do_not_count_as_body_words(self):
+        md = ("## Contents\n\n## The Long War\n\n1\n\n## The Peace\n\n9\n\n"
+              "## The Long War\n\nWar began.\n\n## The Peace\n\nPeace came.\n")
+        chapters = [{"unit_id": "ch-01", "slug": "a", "title": "The Long War"},
+                    {"unit_id": "ch-02", "slug": "b", "title": "The Peace"}]
+        with self.assertRaises(SystemExit) as cm:
+            self.extract(md, chapters)
+        self.assertIn("ch-01: no body words (only bare numbers)", str(cm.exception))
+        self.assertNotIn("ch-02:", str(cm.exception))
+
+    def test_empty_chapter_stops_before_any_file_and_writes_the_log(self):
+        md = ("## Contents\n\n## The Long War\n\n## The Peace\n\n"
+              "## The Long War\n\nWar began.\n\n## The Peace\n\nPeace came.\n")
+        cfg = {"md": "src.md", "slug": "src", "title": "Book", "part": 1,
+               "chapters": [{"unit_id": "ch-01", "slug": "war", "title": "The Long War"},
+                            {"unit_id": "ch-02", "slug": "peace", "title": "The Peace"}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "src.md"), "w", encoding="utf-8", newline="\n") as f:
+                f.write(md)
+            old = extract.SOURCES, extract.OUT, extract.RAW
+            extract.SOURCES, extract.OUT, extract.RAW = tmp, os.path.join(tmp, "out"), os.path.join(tmp, "raw")
+            try:
+                with self.assertRaises(SystemExit) as cm:
+                    extract.build_md_source(cfg)
+                self.assertFalse(os.path.exists(os.path.join(tmp, "out", "src")))
+                with open(os.path.join(tmp, "raw", "src", "repairs.tsv"), encoding="utf-8") as f:
+                    rows = f.read()
+            finally:
+                extract.SOURCES, extract.OUT, extract.RAW = old
+        self.assertIn("ch-01", str(cm.exception))
+        self.assertNotIn("ch-02:", str(cm.exception))
+        # ch-02 runs from the contents entry over ch-01's real start heading.
+        self.assertIn("ch-02\tNone\tchapter-start-inside\tthe start of ch-01 also matches line 7", rows)
+        self.assertIn("outside-chapters", rows)
+
+    def test_other_chapter_start_inside_a_chapter_is_logged(self):
+        md = ("## The Long War\n\nWar began.\n\n## Aftermath\n\nA section.\n\n"
+              "## The Peace\n\nPeace came.\n\n## Aftermath\n\nAfter.\n")
+        chapters = [{"unit_id": "ch-01", "slug": "a", "title": "The Long War"},
+                    {"unit_id": "ch-02", "slug": "b", "title": "The Peace"},
+                    {"unit_id": "ch-03", "slug": "c", "title": "Aftermath"}]
+        out, log = self.extract(md, chapters)
+        self.assertEqual(out["ch-03"], ["After."])
+        rows = [r for r in log.rows if r[2] == "chapter-start-inside"]
+        self.assertEqual([(r[0], "ch-03" in r[3], "line 5" in r[3]) for r in rows], [("ch-01", True, True)])
+
+    def test_bare_number_taken_in_across_placeholder_and_page_break(self):
+        md = ("## War\n\nWar text.\n\n## 2\n\n<!-- image -->\n\n<!-- page break -->\n\n"
+              "## The Peace\n\nPeace came.\n")
+        chapters = [{"unit_id": "ch-01", "slug": "a", "title": "War", "num": 1},
+                    {"unit_id": "ch-02", "slug": "b", "title": "The Peace", "num": 2}]
+        out, log = self.extract(md, chapters)
+        self.assertEqual(out, {"ch-01": ["<!-- page 1 -->\nWar text."], "ch-02": ["<!-- page 2 -->\nPeace came."]})
+        self.assertIn("2", [r[3] for r in log.rows if r[2] == "heading-stripped"])
+
+    def test_bare_number_paragraph_taken_in(self):
+        md = "## War\n\nWar text.\n\n2\n\n<!-- formula-not-decoded -->\n\n## The Peace\n\nPeace came.\n"
+        chapters = [{"unit_id": "ch-01", "slug": "a", "title": "War", "num": 1},
+                    {"unit_id": "ch-02", "slug": "b", "title": "The Peace", "num": 2}]
+        out, _ = self.extract(md, chapters)
+        self.assertEqual(out, {"ch-01": ["War text."], "ch-02": ["Peace came."]})
+
+    def test_text_outside_chapters_is_logged(self):
+        md = ("# The Book\n\n## Contents\n\nFront matter.\n\n## The Long War\n\nWar began.\n\n## Notes\n\n"
+              "Some notes.\n\n## Part Two\n\n## The Peace\n\nPeace came.\n\n## Index\n\nwar, 1\n")
+        chapters = [{"unit_id": "ch-01", "slug": "a", "title": "The Long War", "stop_line": "## Notes"},
+                    {"unit_id": "ch-02", "slug": "b", "title": "The Peace", "stop_line": "## Index"}]
+        out, log = self.extract(md, chapters)
+        self.assertEqual(out, {"ch-01": ["War began."], "ch-02": ["Peace came."]})
+        rows = [r[3] for r in log.rows if r[2] == "outside-chapters"]
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(rows[0].startswith("lines 1-5, 5 words left out: The Book Contents Front matter."))
+        self.assertTrue(rows[1].startswith("lines 11-15, 5 words left out: Notes Some notes. Part Two"))
+        self.assertTrue(rows[2].startswith("lines 21-23, 3 words left out: Index war, 1"))
+
+    def test_only_docling_backslash_escapes_are_undone_and_logged(self):
+        paras, log = self.one("Match \\d+\\.\\d+ on \\\\server\\share for \\_id\\_ and \\[1\\].\n")
+        self.assertEqual(paras, ["Match \\d+\\.\\d+ on \\\\server\\share for _id_ and [1]."])
+        rows = [r[3] for r in log.rows if r[2] == "unescaped"]
+        self.assertEqual(rows[0][:8], "\\[ -> [ ")
+        self.assertEqual(len(rows), 2)
+        rows = [r[3] for r in log.rows if r[2] == "unescaped-underscores"]
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0].startswith("2 \\_ -> _ (line 3), e.g. in: "), rows[0])
+
+    def test_escaped_underscores_logged_once_per_chapter(self):
+        md = ("## War\n\nThe \\_a\\_ and \\_b\\_ fields.\n\n| \\_c | d |\n\n<!-- page break -->\n\nMore \\_e here.\n\n"
+              "## Peace\n\nNo escapes.\n")
+        chapters = [{"unit_id": "ch-01", "slug": "a", "title": "War"}, {"unit_id": "ch-02", "slug": "b", "title": "Peace"}]
+        out, log = self.extract(md, chapters)
+        self.assertIn("_a_ and _b_", out["ch-01"][0])
+        rows = [r for r in log.rows if r[2] == "unescaped-underscores"]
+        self.assertEqual([(r[0], r[1]) for r in rows], [("ch-01", 1)])
+        self.assertTrue(rows[0][3].startswith("6 \\_ -> _ (1 to 2)"), rows[0][3])
+        self.assertNotIn("unescaped", log.kinds())
+
+    def test_outside_chapters_counts_words_not_table_pipes(self):
+        md = "| a | b |\n|---|---|\n| 1 | 2 |\n\n## War\n\nWar began.\n"
+        _, log = self.extract(md, [{"unit_id": "ch-01", "slug": "a", "title": "War"}])
+        rows = [r[3] for r in log.rows if r[2] == "outside-chapters"]
+        self.assertEqual(len(rows), 1)
+        self.assertIn(", 4 words left out", rows[0])
+
+    def test_heading_after_colon_lead_in_not_quoted(self):
+        paras, _ = self.one("The ration rules were these:\n\n### Rationing\n\nBread was scarce.\n", block_quotes=True)
+        self.assertEqual(paras, ["The ration rules were these:", "Rationing", "Bread was scarce."])
+
+    def test_leading_markup_kept_as_prose(self):
+        from count_words import words_in_text
+        body = "\\#1 was the best seller.\n\n&gt; is the prompt.\n\n<!-- page break -->\n\n#hashtag trends.\n"
+        paras, log = self.one(body)
+        self.assertEqual(paras, ["<!-- page 1 -->\n\\#1 was the best seller.", "\\> is the prompt.",
+                                 "<!-- page 2 -->\n\\#hashtag trends."])
+        self.assertEqual(log.kinds().count("leading-markup-kept"), 3)
+        self.assertEqual(words_in_text("\n\n".join(paras)), 11)
+
+    def test_list_continued_on_next_page_is_joined(self):
+        body = "The rules are:\n\n- arrive on time and\n\n<!-- page break -->\n\nleave early.\n\nNext.\n"
+        paras, log = self.one(body)
+        self.assertEqual(paras, ["<!-- page 1 -->\nThe rules are:", "- arrive on time and <!-- page 2 --> leave early.", "Next."])
+        self.assertIn("list-page-joined", log.kinds())
+
+    def test_open_ended_blocks_before_page_break_are_logged(self):
+        cases = ["She wrote:\n\n> The tide came in and\n\n<!-- page break -->\n\n> the boats came home.\n",
+                 "Counts:\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n<!-- page break -->\n\n| 3 | 4 |\n",
+                 "The rules are\n\n<!-- page break -->\n\n- arrive on time\n",
+                 "Rules:\n\n- arrive on time and\n\n<!-- page break -->\n\nLeave early.\n"]
+        for body in cases:
+            _, log = self.one(body)
+            self.assertEqual(log.kinds().count("page-break-unjoined"), 1, body)
+        _, log = self.one("Rules:\n\n- arrive on time.\n\n<!-- page break -->\n\nNext.\n")
+        self.assertNotIn("page-break-unjoined", log.kinds())
+
+    def test_kept_hyphen_keeps_its_space(self):
+        paras, log = self.one("The long- versus short-term view.\n", hyphen_spaces=True)
+        self.assertEqual(paras, ["The long- versus short-term view."])
+        self.assertIn("hyphen-kept", log.kinds())

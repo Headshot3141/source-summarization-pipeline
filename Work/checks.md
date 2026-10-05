@@ -18,6 +18,7 @@ Do not trust PDF title metadata; it can be junk. Confirm title and author from t
 - Microsoft Edge path (PDF rendering):
 - `writing-rules.md` present:
 - Word-count command tested: `{WORD_COUNT_COMMAND}` on `{file}` returned `{n}`
+- Author-check and fidelity-check commands tested (`{AUTHOR_CHECK_COMMAND}`, `{FIDELITY_CHECK_COMMAND}`):
 - Fallbacks in use (interpreter path, PDF build outside the sandbox, manual count rule):
 
 ### Agent harness and limits
@@ -36,7 +37,7 @@ Models and dispatch as set in plan.md, Agents.
 
 ## Extraction and Validation
 
-| Source | Units | Retained words | Method (PDF text / OCR / EPUB) | Config overrides | Notes |
+| Source | Units | Retained words | Method (docling Markdown / PDF text / OCR / EPUB / TXT) | Config overrides | Notes |
 |---|---|---|---|---|---|
 
 - Chapter boundaries and page mappings checked (where):
@@ -46,6 +47,8 @@ Models and dispatch as set in plan.md, Agents.
 - Figures and tables inspected; visual transcriptions added:
 - Block quotations marked (`> `): detection method, count, weaker-evidence log lines and a full listing reviewed, hand fixes:
 - Detected headings listed and checked for split or letter-spaced headings:
+- Docling Markdown, first file (plan.md Step 2, checks 1-7): page-break count against the PDF page count; footnote form and `footnote_pattern`; chapter title headings and number lines; leaked running heads; line-end hyphens; emphasis, lists, escapes, and existing `> ` quotations; every placeholder and the text around it:
+- `repairs.tsv` rows for text outside every chapter (`outside-chapters`) checked against the scope decisions:
 - Open extraction issues (blocking? y/n):
 
 ## Size Limits and Chapter Splitting
@@ -70,7 +73,7 @@ Models and dispatch as set in plan.md, Agents.
 
 ## Scope Exceptions
 
-| Unit | Exception | Reason | Check that will keep flagging it |
+| Unit | Exception | Reason | Entry in `Work/budget_exceptions.json` (or other check it settles) |
 |---|---|---|---|
 
 ## Merge and Transition Review
@@ -105,6 +108,7 @@ One entry per pass: brief file, scope, snapshot directory, records path, edits a
 ## PDF Rendering and Inspection
 
 - Pages; blank or thin pages; U+FFFD count:
+- `python Work/check_pdf_text.py` result (word-for-word match with Summary.md, structural checks):
 - Every heading found in the PDF text:
 - No leftover `Work/`, `.md`, `<!--`, or page-reference strings:
 - Pages inspected visually (first, last, each part start, changed passages):

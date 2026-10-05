@@ -4,8 +4,8 @@ One line per processing unit still to review:
 
     source|draft|summary|record|budget|lower|upper|ceiling
 
-budget, lower, and upper are the draft target and range (DRAFT TARGET and
-RANGE in the prompts); ceiling is what review may grow the unit to where
+budget, lower, and upper are the draft target and range (TARGET, LOWER, and
+UPPER in the prompts); ceiling is what review may grow the unit to where
 clarity or fidelity needs it (Work/common.py). Accepted units are left out,
 so rerunning after a batch shrinks the queue; set a unit back to drafted to
 review it again. Blocked units are left out and listed, because they must not

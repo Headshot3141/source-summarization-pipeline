@@ -59,6 +59,9 @@ A summary condenses its source in the source's own order. Think of it as two pag
 - **Add no structure the source lacks.** Do not invent an introduction, an overview, a "main ideas" or "key arguments" section, a list of takeaways, or a closing summary. A summary opens with what the source opens with, and has an introduction or a conclusion only where the source has one.
 - **Headings.** Use the `##` chapter heading your prompt gives. Use a `###` heading only where the source itself has a section heading at that point, with the source's wording. Never add a heading of your own.
 - **Make room by leaving things out, not by squeezing sentences.** When the budget is tight, drop whole minor points first: secondary examples, digressions, repetition, and asides. Do not strip the words a sentence needs to read clearly, such as articles, connecting words, and the nouns that pronouns refer to. A sentence that needs a second reading saves nothing.
+- **Notes.** A chapter source may end with a notes block, headed "Notes to this chapter (printed as footnotes in the source):" or "(printed at the back of the book):". Where a note adds substance to the text, put that substance into the summary at the point where the note's number appears, as ordinary prose with no note number, at the note's own strength. Leave out notes that only cite sources. Never summarize the notes block as a section of its own.
+- **Tables.** Where the argument depends on a table, give the figures it uses in prose, exactly as printed, with what each one measures. Never reproduce the table, and never total, average, or round its figures (rule (d)).
+- **Extraction escapes.** A backslash at the start of a source paragraph (`\#`, `\>`) was added in extraction so the text is not read as Markdown. It is not the author's; do not copy it into a summary or a quotation. Do not start a summary paragraph with `#` or `>` either, since Markdown would read it as a heading or a block quotation: rephrase so the paragraph opens with a word.
 - **Connect points only as the source does.** Use the connecting word the source supports ("because", "so", "by contrast", "later"). Never add a causal or contrastive link the source does not make; where the source simply moves on, start a new paragraph.
 
 ## Style
@@ -69,7 +72,7 @@ The goal is prose that is clear and concise for a reader who has not read the so
 
 - Write in the third person. Never address the reader.
 - Do not use em dashes in summary prose. Text inside quotation marks and block quotations keeps its original punctuation, and extracted source text is never edited.
-- Write in paragraphs. Use a list only where the source passage is itself a list. Apart from the headings described in "Shape of a summary", the only other Markdown in a summary is a reproduced block quotation (`> `).
+- Write in paragraphs. Use a list only where the source passage is itself a list, and put a blank line before it, or it renders as part of the paragraph above. Apart from the headings described in "Shape of a summary", the only other Markdown in a summary is a reproduced block quotation (`> `).
 - State the author's views directly (see "Naming the author"). Clearly mark views that belong to others: quoted speakers, opponents, cited writers, and allegations. Do not present a quoted opponent's view as the author's.
 - Keep qualifications and distinctions. Do not turn association into causation, possibility into certainty, or a single example into a general claim.
 - Explain source-defined terms for a reader who has not read the original, using only the source.

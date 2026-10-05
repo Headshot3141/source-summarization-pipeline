@@ -41,10 +41,52 @@ class MergeProtection(Project):
         self.assertTrue(self.load()[0][0].get("merged_sha"))
         chapter = self.root / "Work/Summaries/s/01-one.md"
         chapter.write_text("## One\n\nFirst part, with a seam fix.\n\nSecond part.\n", encoding="utf-8")
+        # Parts unchanged: the edited chapter is kept, and that is not a failure.
+        code, out = run(merge_chapters.main)
+        self.assertEqual(code, 0, out)
+        self.assertIn("kept s/ch-01", out)
+        self.assertIn("seam fix", chapter.read_text(encoding="utf-8"))
+        # Parts changed: refusing protects the edits.
+        self.write("Work/Summaries/s/parts/01-one-part2-of-2.md", "Second part, reworked.\n")
         code, out = run(merge_chapters.main)
         self.assertNotEqual(code, 0)
         self.assertIn("REFUSED s/ch-01", out)
         self.assertIn("seam fix", chapter.read_text(encoding="utf-8"))
+
+    def test_crlf_or_bom_copy_of_a_fresh_merge_is_kept(self):
+        self.ready()
+        chapter = self.root / "Work/Summaries/s/01-one.md"
+        chapter.write_bytes(b"\xef\xbb\xbf## One\r\n\r\nFirst part.\r\n\r\nSecond part.\r\n")
+        code, out = run(merge_chapters.main)
+        self.assertEqual(code, 0, out)
+        self.assertIn("kept s/ch-01", out)
+        self.assertTrue(self.load()[0][0].get("merged_sha"))
+
+    def test_bad_part_is_reported_and_other_chapters_continue(self):
+        self.ready()
+        (self.root / "Work/Summaries/s/parts/01-one-part2-of-2.md").unlink()
+        code, out = run(merge_chapters.main)
+        self.assertNotEqual(code, 0)
+        self.assertIn("NOT MERGED s/ch-01: missing part summary", out)
+
+    def test_merge_keeps_a_status_set_meanwhile(self):
+        self.ready()
+        original, calls = merge_chapters.load, []
+
+        def load():
+            # After the script's first read, another tool accepts ch-02.
+            if calls:
+                self.parts[1]["status"] = "accepted"
+                self.save()
+            calls.append(1)
+            return original()
+
+        merge_chapters.load = load
+        try:
+            run(merge_chapters.main)
+        finally:
+            merge_chapters.load = original
+        self.assertEqual(self.load()[0][1]["status"], "accepted")
 
     def test_unedited_chapter_can_be_remerged(self):
         self.ready()
@@ -99,11 +141,11 @@ class Queues(Project):
         self.save()
 
     def test_word_check_flags_drafts_ceilings_and_document_ratio(self):
-        self.write("Work/Drafts/s/02-two.md", "## Two\n\n" + words(300))      # over 230
+        self.write("Work/Drafts/s/parts/01-one-part1-of-2.md", words(300))   # over 230, not yet reviewed
         self.write("Work/Summaries/s/02-two.md", "## Two\n\n" + words(260))   # ceiling 250
         code, out = run(check_words.main)
         self.assertEqual(code, 1)
-        self.assertIn("DRAFT OVER CHAPTER Work/Drafts/s/02-two.md", out)
+        self.assertIn("DRAFT OVER PART Work/Drafts/s/parts/01-one-part1-of-2.md", out)
         self.assertIn("ABOVE CEILING CHAPTER Work/Summaries/s/02-two.md", out)
         self.assertIn("RATIO s: 0.520", out)
         self.assertIn("above target", out)
@@ -121,6 +163,60 @@ class Queues(Project):
         code, out = run(check_words.main)
         self.assertEqual(code, 0, out)
         self.assertIn("RATIO document: 0.480", out)
+
+    def test_settled_drafts_and_merged_parts_stop_flagging(self):
+        # An out-of-range draft stops counting once its reviewed summary exists.
+        self.write("Work/Drafts/s/02-two.md", "## Two\n\n" + words(300))
+        self.write("Work/Summaries/s/02-two.md", "## Two\n\n" + words(200))
+        # Part summaries are stale once the chapter is merged.
+        self.write("Work/Summaries/s/parts/01-one-part1-of-2.md", words(900))
+        self.write("Work/Summaries/s/01-one.md", "## One\n\n" + words(450))
+        code, out = run(check_words.main)
+        self.assertEqual(code, 0, out)
+        self.assertIn("RATIO document: 0.433", out)
+
+    def check_with_exceptions(self, exceptions):
+        self.write("Work/budget_exceptions.json", json.dumps(exceptions))
+        saved = check_words.EXCEPTIONS
+        check_words.EXCEPTIONS = self.root / "Work/budget_exceptions.json"
+        try:
+            return run(check_words.main)
+        finally:
+            check_words.EXCEPTIONS = saved
+
+    def test_recorded_exception_is_settled(self):
+        self.write("Work/Summaries/s/02-two.md", "## Two\n\n" + words(260))   # ceiling 250
+        code, out = self.check_with_exceptions(
+            {"s/ch-02": {"flag": "ABOVE CEILING", "max_words": 260, "reason": "restored reversals"}})
+        self.assertIn("EXCEPTION ABOVE CEILING", out)
+        self.assertNotIn("OVER MAXIMUM", out)
+        self.assertEqual(code, 0, out)
+
+    def test_exception_settles_only_its_kind_and_approved_length(self):
+        self.write("Work/Summaries/s/02-two.md", "## Two\n\n" + words(270))
+        code, out = self.check_with_exceptions(
+            {"s/ch-02": {"flag": "ABOVE CEILING", "max_words": 260, "reason": "approved at 260"}})
+        self.assertEqual(code, 1)   # grew past the approved length
+        self.assertIn("ABOVE CEILING CHAPTER", out)
+        code, out = self.check_with_exceptions({"s/ch-02": {"flag": "UNDER", "reason": "apparatus"}})
+        self.assertEqual(code, 1)   # an UNDER exception does not settle a ceiling overage
+        self.assertIn("unused exception s/ch-02", out)
+
+    def test_malformed_exception_is_rejected(self):
+        for bad in ("just a reason",
+                    {"flag": "ABOVE CEILING", "max_words": "260", "reason": "x"},
+                    {"flag": "ABOVE CEILING", "reason": "no max"},
+                    {"flag": "UNDER", "min_words": None, "reason": "x"}):
+            code, out = self.check_with_exceptions({"s/ch-02": bad})
+            self.assertNotEqual(code, 0, bad)
+            self.assertIn("needs", out)
+
+    def test_under_exception_has_a_floor(self):
+        self.write("Work/Summaries/s/02-two.md", "## Two\n\n" + words(100))   # floor 170
+        settled = {"s/ch-02": {"flag": "UNDER", "min_words": 90, "reason": "apparatus-heavy"}}
+        self.assertEqual(self.check_with_exceptions(settled)[0], 0)
+        self.write("Work/Summaries/s/02-two.md", "## Two\n\n" + words(20))
+        self.assertEqual(self.check_with_exceptions(settled)[0], 1)
 
     def test_review_queue_has_ranges_and_skips_accepted_units(self):
         self.parts[1]["parts"][0]["status"] = "accepted"
@@ -141,6 +237,21 @@ class Queues(Project):
         self.assertEqual(second[5:7], ["Work/Chapters/s/parts/01-one-part1-of-2.md", "-"])
         self.assertEqual(unsplit[4:7], ["Work/Chapters/s/02-two.md", "-", "-"])
         self.assertEqual(first[8], "Work/Reviews/s/verify-round2/01-one-part1-of-2.md")
+
+
+class NoteContext(unittest.TestCase):
+    def test_fold_entry_gets_the_note_marker_and_still_parses_as_context(self):
+        from check_parts import CONTEXT_RE
+        body = "Text with a reference 3 here.\n\nMore text.\n\nNotes:\n\n3 A substantive note.\n"
+        spans = [(0, body.index("Notes:")), (body.index("Notes:"), len(body))]
+        notes = []
+        before, after = split_parts.place_context(
+            [{"text": "3 A substantive note.", "fold": True}], body, spans, 1, "ch-01", notes)
+        self.assertEqual(after, [("ch-01 part 2", "3 A substantive note.", True)])
+        block = split_parts.context_block(*after[0])
+        self.assertIn("fold its substance in", block)
+        self.assertEqual(CONTEXT_RE.findall(block + "\n"), ["3 A substantive note."])
+        self.assertIn("do not summarize it", split_parts.context_block("x", "y"))
 
 
 class TableWords(unittest.TestCase):

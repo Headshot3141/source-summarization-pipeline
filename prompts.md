@@ -2,7 +2,7 @@
 
 The coordinator fills these in and dispatches them. Agents never need `plan.md`: each prompt names every file the agent reads, and `writing-rules.md` carries the shared rules, including the preservation rule. Keep it that way, because a large plan in every agent's context costs time and usage on each task.
 
-Before dispatch, fill in every path, unit key, budget, and command placeholder. `WORD COUNT COMMAND` must run the shared counting function on the file at `WRITE`, for example `python Work/count_words.py Work/Drafts/{slug}/{NN}-{name}.md`, run from the project root. `AUTHOR CHECK COMMAND` runs `python Work/check_author_refs.py` on the same file. `FIDELITY CHECK COMMAND` runs `python Work/check_fidelity.py <summary> <source>` on the same file and its SOURCE; it flags numbers, quotations, block quotations, and names in the summary that the source does not contain. `AUTHOR` is the source's naming convention from the Sources table in `plan.md`: the name form, and the pronoun or "no pronoun", for example "Call the author Penhale. The source never genders Penhale: use no pronoun." For an interview, say whose voice the unit is in (normally the interviewee) and name the interviewer as another speaker, each with a pronoun or "no pronoun". Every prompt that writes or edits summary prose, here and in `passes/`, carries `AUTHOR`; for a whole-document chunk, give the convention for each source in the chunk. Never write only "Call the author X": in one run that line, with no limit on how often, produced the name in nearly every sentence. Budgets come from `Work/review_queue.txt` (`python Work/make_review_queue.py`), which lists each unit's draft budget (about 0.40 of its source words), the draft range (±15%), and its ceiling (the budget plus 0.10 of its source words), so nobody computes them by hand. The summarizer drafts to the budget; the reviewer may use the room up to the ceiling for clarity and fidelity. The document as a whole aims at 0.50 of its source and must not exceed 0.55; the coordinator tracks that with `Work/check_words.py`.
+Before dispatch, fill in every path, unit key, budget, and command placeholder. `WORD COUNT COMMAND` must run the shared counting function on the file at `WRITE`, for example `python Work/count_words.py Work/Drafts/{slug}/{NN}-{name}.md`, run from the project root. `AUTHOR CHECK COMMAND` runs `python Work/check_author_refs.py` on the same file. `FIDELITY CHECK COMMAND` runs `python Work/check_fidelity.py <summary> <source>` on the same file and its SOURCE; it flags numbers, quotations, block quotations, and names in the summary that the source does not contain. `AUTHOR` is the source's naming convention from the Sources table in `plan.md`: the name form, and the pronoun or "no pronoun", for example "Call the author Penhale. The source never genders Penhale: use no pronoun." For an interview, say whose voice the unit is in (normally the interviewee) and name the interviewer as another speaker, each with a pronoun or "no pronoun". Every prompt that writes or edits summary prose, here and in `passes/`, carries `AUTHOR`; for a whole-document chunk, give the convention for each source in the chunk. Never write only "Call the author X": in one run that line, with no limit on how often, produced the name in nearly every sentence. Budgets come from `Work/review_queue.txt` (`python Work/make_review_queue.py`), which lists each unit's draft budget (about 0.40 of its source words) as `budget`, the draft range (±15%) as `lower` and `upper` (LOWER and UPPER in the prompts), and its ceiling (the budget plus 0.10 of its source words) as `ceiling`, so nobody computes them by hand. A chapter's budget and ceiling (CHAPTER_BUDGET, CHAPTER_CEILING, and the remediation CEILING) are `budget` and `ceiling` on the chapter's entry in `Work/parts_manifest.json`, also printed in `Work/parts_report.txt`. When `Work/check_words.py` reports the document above 0.50, fill CEILING for the remaining reviews and remediation with the unit's budget, or with the current summary's count where that is higher, so they add nothing beyond preservation and never cut a faithful summary to fit. Where SOURCE has no page markers (a docling file exported without page breaks), records cite a short exact quote of the source passage instead of a page marker. The summarizer drafts to the budget; the reviewer may use the room up to the ceiling for clarity and fidelity. The document as a whole aims at 0.50 of its source and must not exceed 0.55; the coordinator tracks that with `Work/check_words.py`.
 
 Templates for later passes live in `passes/`.
 
@@ -37,8 +37,10 @@ support. Do not fact-check, correct, endorse, refute, or bring in outside
 context: reproduce the source as printed, errors included.
 
 The preservation rule in the shared instructions is binding. Every contrast
-reversal, hedge, estimate marker, scope word, and attribution marker you keep
-the claim for, you keep. Never total, average, or round figures. If you cut
+reversal, hedge, estimate marker, scope word, condition, negation and its
+scope, sequence word, reach word ("one of the"), attribution marker, and
+frame on a hypothetical, irony, or open question (rule (f)) that belongs to
+a claim you keep, you keep. Never total, average, or round figures. If you cut
 a claim, cut its evidence; if you keep evidence, keep its claim. Preservation
 is a sufficient reason to exceed the range; name the items in your reply.
 Padding never is.
@@ -100,7 +102,8 @@ WORD COUNT COMMAND: {WORD_COUNT_COMMAND}
 AUTHOR CHECK COMMAND: {AUTHOR_CHECK_COMMAND}
 FIDELITY CHECK COMMAND: {FIDELITY_CHECK_COMMAND}
 AUTHOR: {AUTHOR_CONVENTION}
-TARGET: {BUDGET} prose words (the draft target); CEILING: {CEILING} words.
+TARGET: {BUDGET} prose words (the draft target); LOWER: {LOWER} words (the
+draft range's floor); CEILING: {CEILING} words.
 
 Read the shared instructions, SOURCE, and DRAFT. Write the complete reviewed
 summary to WRITE and save the review record. In a later review round, start
@@ -114,8 +117,10 @@ own knowledge of the subject.
    reported. Resolve every pronoun to the actor the source means.
 2. Preservation: apply the binding preservation rule in the shared
    instructions. A lost contrast reversal, hardened hedge, migrated
-   attribution, computed figure, or orphaned piece of evidence is a
-   material error to fix, never an acceptable omission. Apply the
+   attribution, dropped frame (rule (f)), dropped condition, widened
+   negation or reach, implied order or cause (rule (g)), computed figure,
+   or orphaned piece of evidence is a material error to fix, never an
+   acceptable omission. Apply the
    block-quotation rule too: each "> " quotation in SOURCE appears in the
    summary whole and exact, or not at all. Paraphrase, condensation, or a
    partial quotation of one is a material error. Restore a missing marker
@@ -134,7 +139,8 @@ own knowledge of the subject.
    the draft squeezed a sentence past easy reading, expand it rather than
    cut further. Leave clear sentences alone. You may grow the summary up to
    CEILING for these repairs and for restored fidelity; above CEILING only
-   for preservation items, named in the record. Do not pad. Apply the naming rule in
+   for preservation items or a restored main argument, reasoning step, or
+   piece of evidence a kept conclusion needs, each named in the record. Do not pad. Apply the naming rule in
    the shared instructions: remove prefaces such as "the author argues"
    that only introduce the author's own view, and keep at most one
    reference to the author per paragraph. Run AUTHOR CHECK COMMAND and
@@ -158,14 +164,14 @@ WRITE following your final edit:
   Status: accepted | blocked
   Word count: {measured} (budget {BUDGET}, ceiling {CEILING}). {Within ceiling | Over ceiling: the preservation items that required it | Under the draft range: why nothing is missing}
   ## Corrections
-  Each consequential change: before, after, and the page marker or passage
-  that supports it.
+  Each consequential change: before, after, and the nearest page marker (or
+  a short exact quote where SOURCE has none) that supports it.
   ## Contrast audit (a)
   Every contrast marker in SOURCE (owned text only for a part): reversal
   present in the summary, or why its claim was omitted entirely.
   ## Number audit (d)
   Every number, date, quantity, and proportion in the summary, with the
-  page marker it comes from. Flag any the source does not state in that form.
+  page marker (or short exact quote) it comes from. Flag any the source does not state in that form.
   ## Script flags
   Each FIDELITY CHECK COMMAND flag on the final summary: fixed, or why it
   is a false alarm (for example, the source states the number in another
@@ -196,9 +202,10 @@ Reply with accepted or blocked status and a short changelog.
 
 - Point the source, draft, summary, and review-record paths at the part paths in the parts manifest, and use the part budget and ceiling from the review queue.
 - Replace the heading instructions, including the reviewer's "Keep the ## heading" line, with: "Write no `##` heading; the merge adds the chapter heading. Add a `###` heading only where the owned text itself has a section heading, using its wording. Do not copy frontmatter, page markers, or owned-text markers into the summary."
-- Add: "Summarize only the owned text between the `<!-- begin owned text -->` and `<!-- end owned text -->` markers. Marked overlap context at the start of SOURCE comes from the end of the previous part: use it, and any other marked context block, to understand references and qualify the owned text, and do not summarize it."
+- Add: "Summarize only the owned text between the `<!-- begin owned text -->` and `<!-- end owned text -->` markers. Marked overlap context at the start of SOURCE comes from the end of the previous part: use it, and any other marked context block, to understand references and qualify the owned text, and do not summarize it. The one exception is a context block marked as a note ("a note owned there: fold its substance in"): fold its substance in where its number appears in your owned text, as "Notes" in the shared instructions describes."
 - Add: "This part is one slice of a chapter, and its summary will be joined to the summaries of the parts around it. Summarize only what the owned text contains, in its order. Begin with the owned text's first content. Do not introduce the chapter, its subject, or the author unless the owned text does, and do not close with a summing-up unless the owned text ends with one."
-- A part that is pure apparatus (a bibliography or blank page inside the owned text) gets an empty summary and a record saying so. Record it as a scope exception in `Work/checks.md`, because `check_words.py` will keep reporting it as UNDER.
+- Add: "If your owned text ends with the chapter's notes block, fold in only the notes whose numbers appear in your owned text, and leave out the rest: the coordinator gives each of those to the part that holds its reference number, as context."
+- A part that is pure apparatus (a bibliography or blank page inside the owned text) gets an empty summary and a record saying so. Record it as a scope exception in `Work/checks.md` and settle its UNDER flag in `Work/budget_exceptions.json`.
 
 ## Merger (optional; use only within the Step 7 size limit)
 
@@ -221,9 +228,10 @@ your task.
 The file contains exactly one ## {Chapter Title} heading, followed by the
 parts' prose in order, keeping any ### headings the parts carry.
 
-Keep every substantive claim, name, number, date, hedge, contrast, and
-attribution marker on another speaker's view from the part summaries, and
-add no claims of your own. Edit only the seams: where one part ends and
+Keep every substantive claim, name, number, date, hedge, contrast,
+condition, negation, sequence and reach word, attribution marker on another
+speaker's view, and frame on a hypothetical, irony, or open question from
+the part summaries, and add no claims of your own. Edit only the seams: where one part ends and
 the next begins abruptly, adjust a sentence or remove a duplicated framing
 line. If a part re-introduces the author or prefaces the author's own view
 with the author's name, remove the preface, as the naming rule in the
@@ -262,8 +270,9 @@ view whose marker sits in the other part, a part that opens as though the
 chapter were starting or closes with a summing-up the source does not
 have, or a part that re-introduces the author or prefaces the author's own
 view. Every edit must be supported by the source passages. Keep every
-substantive claim, hedge, contrast, figure, and attribution marker on
-another speaker's view. Use targeted string replacements; do not rewrite
+substantive claim, hedge, contrast, figure, condition, negation, sequence
+and reach word, attribution marker on another speaker's view, and frame on
+a hypothetical, irony, or open question. Use targeted string replacements; do not rewrite
 the file. Check that the summary holds no frontmatter, page marker,
 or owned-text marker.
 

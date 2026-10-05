@@ -19,11 +19,18 @@ The chapter summary is canonical once merged: transition review,
 verification, and later passes edit it, never the part summaries. Each merge
 records the SHA-256 of what it wrote as `merged_sha` in the parts manifest.
 If the chapter file already exists and differs from that record (or there
-is no record), it has been edited since the merge, and the script refuses to
-overwrite it. Use --force with an explicit slug and unit only after a real
-rework of the parts, and archive the edited chapter first.
+is no record), it has been edited since the merge. If the part summaries
+would merge to exactly what was merged before, the chapter is kept and
+reported, which is the normal case during transition review. If the parts
+have changed, the script refuses to overwrite the edited chapter and exits
+1. Use --force with an explicit slug and unit only after a real rework of
+the parts, and archive the edited chapter first. The manifest is reread
+before each record is written, so a status set meanwhile is kept.
 
-A part summary is refused, and nothing is written for its chapter, if it has
+A chapter whose part summaries cannot be merged is reported as NOT MERGED,
+the other chapters are still processed, and the script exits 1. A part
+summary is refused, and nothing is written for its chapter, if it is
+missing or has
 YAML frontmatter, an HTML comment (page, overlap, or owned-text marker), or
 a heading other than `###`: part summaries are paragraphs, with `###` only
 for the source's own section headings, and in one run a reviewer copied its
@@ -60,7 +67,8 @@ def part_texts(entry):
     """Reviewed part summary texts, in part order, with empties dropped.
 
     An empty part summary is allowed only for a part that is pure apparatus
-    (a bibliography, say); record it as a scope exception in checks.md.
+    (a bibliography, say); record it as a scope exception in checks.md and
+    settle its UNDER flag in Work/budget_exceptions.json.
     """
     texts = []
     for p in sorted(entry["parts"], key=lambda x: x["part_index"]):
@@ -80,34 +88,38 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def edited_since_merge(entry):
-    """True if the chapter file exists and is not exactly what the last merge wrote."""
-    out = ROOT / entry["summary"]
-    return out.exists() and sha(out.read_bytes()) != entry.get("merged_sha")
+def normalized(data):
+    """File bytes without a UTF-8 BOM and with LF line endings."""
+    return data.decode("utf-8-sig").replace("\r\n", "\n").encode("utf-8")
 
 
-def merge_one(entry, dry_run):
-    """Write the merged chapter; return its SHA-256, or None on a dry run."""
-    slug, unit = entry["source_slug"], entry["unit_id"]
+def build_chapter(entry):
+    """Return (chapter text, number of non-empty parts) from the reviewed part summaries."""
     texts = part_texts(entry)
-    title = entry.get("title") or unit
+    title = entry.get("title") or entry["unit_id"]
     body = "\n\n".join(texts)
-    chapter = "## %s\n\n%s\n" % (title, body) if body else "## %s\n" % title
-    out = ROOT / entry["summary"]
+    return ("## %s\n\n%s\n" % (title, body) if body else "## %s\n" % title), len(texts)
+
+
+def report(entry, chapter, nparts):
     words = words_in_text(chapter)
     budget = entry.get("budget")
-    flag = ""
-    if budget and entry.get("words"):
+    ceiling = entry.get("ceiling")
+    if ceiling is None and budget and entry.get("words"):
         ceiling = review_ceiling(budget, entry["words"])
-        if words > ceiling:
-            flag = "  <-- ABOVE CEILING %d" % ceiling
-    print("%s/%s: %d parts, %d words (budget %s)%s" % (slug, unit, len(texts), words, budget, flag))
-    if dry_run:
-        return None
-    data = chapter.encode("utf-8")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(data)
-    return sha(data)
+    flag = "  <-- ABOVE CEILING %d" % ceiling if ceiling and words > ceiling else ""
+    print("%s/%s: %d parts, %d words (budget %s)%s" % (
+        entry["source_slug"], entry["unit_id"], nparts, words, budget, flag))
+
+
+def record_merge(key, digest):
+    """Store merged_sha on the chapter's entry, rereading the manifest so a
+    status change made since this script started is not overwritten."""
+    entries = load()
+    for e in entries:
+        if (e["source_slug"], e["unit_id"]) == key:
+            e["merged_sha"] = digest
+    PARTS_MANIFEST.write_text(json.dumps(entries, indent=1), encoding="utf-8", newline="\n")
 
 
 def main():
@@ -124,10 +136,9 @@ def main():
         for i in range(0, len(args), 2):
             wanted.add((args[i], args[i + 1]))
 
-    entries = load()
     merged = skipped = 0
-    refused = []
-    for entry in entries:
+    kept, refused, problems = [], [], []
+    for entry in load():
         key = (entry["source_slug"], entry["unit_id"])
         if wanted and key not in wanted:
             continue
@@ -146,19 +157,51 @@ def main():
         if entry.get("status") == "accepted":
             skipped += 1
             continue
-        if edited_since_merge(entry) and not force:
-            refused.append("%s/%s" % key)
+        out = ROOT / entry["summary"]
+        # Compare content, not bytes: a BOM or CRLF line endings added by an
+        # editor are not edits.
+        current = sha(normalized(out.read_bytes())) if out.exists() else None
+        edited = current is not None and current != entry.get("merged_sha")
+        try:
+            chapter, nparts = build_chapter(entry)
+        except SystemExit as exc:
+            # A missing or leaky part summary: report it and go on with the
+            # other chapters. An edited chapter is safe either way.
+            problems.append("%s/%s: %s" % (key[0], key[1], exc.code))
+            skipped += 1
             continue
-        digest = merge_one(entry, dry_run)
-        if digest:
-            entry["merged_sha"] = digest
-            PARTS_MANIFEST.write_text(json.dumps(entries, indent=1), encoding="utf-8", newline="\n")
+        data = chapter.encode("utf-8")
+        if edited and not force:
+            if sha(data) == entry.get("merged_sha"):
+                # Parts unchanged since the last merge; the chapter carries later
+                # edits (seam fixes, remediation). Nothing to do.
+                kept.append("%s/%s" % key)
+            elif sha(data) == current:
+                # The chapter already equals a fresh merge; just record it.
+                if not dry_run:
+                    record_merge(key, current)
+                kept.append("%s/%s" % key)
+            else:
+                refused.append("%s/%s" % key)
+            skipped += 1
+            continue
+        report(entry, chapter, nparts)
+        if not dry_run:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(data)
+            record_merge(key, sha(data))
         merged += 1
     print("%s %d chapter(s); skipped %d" % ("would merge" if dry_run else "merged", merged, skipped))
+    for k in kept:
+        print("kept %s: the chapter summary stays as it is (its parts are unchanged since the last merge, "
+              "or it already equals a fresh merge)" % k)
     for r in refused:
-        print("REFUSED %s: the chapter summary was edited after its last merge (or was not written by this "
-              "script); later edits live there. Archive it and rerun with --force only after reworking the parts." % r)
-    if refused:
+        print("REFUSED %s: the part summaries changed, but the chapter summary was edited after its last merge "
+              "(or was not written by this script), and those edits live there. Archive it and rerun with "
+              "--force only after reworking the parts." % r)
+    for p in problems:
+        print("NOT MERGED %s" % p)
+    if refused or problems:
         sys.exit(1)
 
 

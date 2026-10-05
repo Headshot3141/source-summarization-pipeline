@@ -20,10 +20,10 @@ The template's summarizer and reviewer prompts now apply the preservation rule f
 
 ## Plan of the pass
 
-1. **Round 1, report-only sample.** Pick about 10-15% of chapters across every source, weighted toward long, argument-dense, and late-processed chapters, and toward chapters with many quoted or reported voices. Build the task list with `python Work/make_verify_queue.py <slug> <unit_id> ...`: one task per processing unit, so a split chapter gets one verifier per part. Each verifier gets the part it checks, the parts before and after it as context (one of them at a chapter's start or end; none for an unsplit chapter), and the canonical chapter summary, and checks only the stretch of the summary that covers its part. This keeps every verifier's source well under the whole chapter. One fresh-context Opus 5.5 agent per task, using the verifier prompt below. Agents change nothing.
+1. **Round 1, report-only sample.** Pick about 10-15% of chapters across every source, weighted toward long, argument-dense, and late-processed chapters, and toward chapters with many quoted or reported voices. Build the task list with `python Work/make_verify_queue.py <slug> <unit_id> ...`: one task per processing unit, so a split chapter gets one verifier per part. Each verifier gets the part it checks, the parts before and after it as context (one of them at a chapter's start or end; none for an unsplit chapter), and the canonical chapter summary, and checks only the stretch of the summary that covers its part. The neighbouring parts are context, read only where a reference crosses the boundary. One fresh-context Opus 5.5 agent per task, using the verifier prompt below. Agents change nothing.
 2. **Triage.** The coordinator checks each material finding against the source, confirms, downgrades, or upgrades it, and tallies findings per source in the Round results table.
 3. **Decide scope with the user.** Project the material-findings rate per source onto the unchecked chapters. Options: fix only the sampled chapters; full coverage; or risk-ordered full coverage, worst source first, stopping early on any source that proves clean. Partial remediation leaves a document with no marking of which chapters were verified, so full or risk-ordered coverage is usually right. Record the decision.
-4. **Remediation rounds.** Mode A (verify and fix) for units with no round-1 record; Mode B (fix only) for sampled units, working from their round-1 record. Build the list with `python Work/make_verify_queue.py --round 2 ...`. Tasks are per part, as in round 1, but all of a chapter's parts edit the same chapter summary: run them one after another within a chapter (one writer per file), and in parallel across chapters. Size each round to fit one usage window (see Pacing).
+4. **Remediation rounds.** Mode A (verify and fix) for units with no round-1 record; Mode B (fix only) for sampled units, working from their round-1 record. Build the list with `python Work/make_verify_queue.py --round 2 ...`. Tasks are per part, as in round 1, but all of a chapter's parts edit the same chapter summary: run them one after another within a chapter (one writer per file), and in parallel across chapters. Build each round's queue before setting any status back to `drafted`: the queue lists accepted chapters only. Size each round to fit one usage window (see Pacing).
 5. **Close.** Update the Word Budgets table in `plan.md` with final counts and overage reasons, set statuses, reassemble, and record the pass in `Work/checks.md`. The PDF is rendered once, after the last pass (plan.md Step 12).
 
 Coordinator setup before round 1: nothing is snapshotted, because round 1 edits nothing. Before the first remediation round, run `python Work/snapshot_summaries.py verify` so every repair can be diffed against `Work/Summaries_preverify/`.
@@ -35,15 +35,15 @@ Independently verify one stretch of an accepted chapter summary against its
 source. This is report-only: write exactly one file, RECORD.
 
 SOURCE: {source from the queue line}
-PREVIOUS PART: {prev, or "none"}
-NEXT PART: {next, or "none"}
+PREVIOUS PART: {prev; write "none" where the queue shows "-"}
+NEXT PART: {next; write "none" where the queue shows "-"}
 SUMMARY: {summary from the queue line}
 RECORD: {record from the queue line}
 BRIEF: {verification-pass.md}, sections "Rules for verifiers" and "Verifier record"
 SHARED INSTRUCTIONS: writing-rules.md
-FIDELITY CHECK COMMAND: python Work/check_fidelity.py <SUMMARY path> <SOURCE path>
+FIDELITY CHECK COMMAND: {FIDELITY_CHECK_COMMAND} <SUMMARY path> <SOURCE path>
 AUTHOR: {AUTHOR_CONVENTION}
-RATIO: about {RATIO} of the source (this chapter's summary words / source words).
+RATIO: about {RATIO} of the source (the chapter summary's count from Work/count_words.py divided by the chapter's `words` in Work/parts_manifest.json).
 
 Read the two BRIEF sections, the shared instructions, then SOURCE and
 SUMMARY in full. SOURCE is the text you verify: for a part, its owned text
@@ -73,8 +73,9 @@ Check, in priority order:
 
 Not a finding:
 
+- A note's substance in the stretch, when SOURCE gives that note as a context block marked "fold its substance in", or, for the last part, a note from the owned notes block that the summary folds in elsewhere, where its number appears. Notes are covered where their numbers appear, not as a section of their own.
 - A faithful reproduction of an error in the source. List it in its own no-action section. A summary that silently *corrects* the source is a finding.
-- Omitted apparatus and out-of-scope sections (see the Scope Decisions in `plan.md`; the coordinator pastes the exclusions here): {SCOPE_EXCLUSIONS}
+- Omitted apparatus and out-of-scope sections: {SCOPE_EXCLUSIONS, pasted by the coordinator from the plan's scope decisions}
 - Compression itself. The summary keeps about RATIO of its source (drafts aim at 0.40, and review may add up to 0.10 more). Flag an omission only when it changes or weakens the author's argument.
 - A statement of the author's own view with no attribution. Under the naming rule in `writing-rules.md` the summary speaks in the author's voice. It is a finding only when another speaker's view reads as the author's, or when the return to the author's view after another speaker's is unmarked.
 
@@ -93,7 +94,7 @@ it is a false alarm. "None" if there are none.
 
 ## Material findings
 Errors that change meaning. For each: the quoted summary text, what the
-source says (quoted), the nearest <!-- page N --> marker, the defect class,
+source says (quoted), the nearest <!-- page N --> marker where SOURCE has one, the defect class,
 and a suggested correction.
 
 ## Minor findings
@@ -118,8 +119,8 @@ preservation rule.
 
 MODE: A (verify and fix) | B (fix only, from ROUND1)
 SOURCE: {source from the queue line}
-PREVIOUS PART: {prev, or "none"}
-NEXT PART: {next, or "none"}
+PREVIOUS PART: {prev; write "none" where the queue shows "-"}
+NEXT PART: {next; write "none" where the queue shows "-"}
 SUMMARY: {summary from the queue line}
 ROUND1: {the round-1 record for this unit}   (Mode B only)
 RECORD: {record from the round-2 queue line}
@@ -127,7 +128,7 @@ BRIEF: {verification-pass.md}, sections "Rules for verifiers" and "Remediation r
 SHARED INSTRUCTIONS: writing-rules.md
 WORD COUNT COMMAND: {WORD_COUNT_COMMAND}
 AUTHOR CHECK COMMAND: {AUTHOR_CHECK_COMMAND}
-FIDELITY CHECK COMMAND: python Work/check_fidelity.py <SUMMARY path> <SOURCE path>
+FIDELITY CHECK COMMAND: {FIDELITY_CHECK_COMMAND} <SUMMARY path> <SOURCE path>
 AUTHOR: {AUTHOR_CONVENTION}
 CEILING: {CEILING} words for the whole chapter summary.
 
@@ -147,11 +148,11 @@ and anything left unresolved.
 
 ## Remediation rules
 
-- Repair the defect and nothing else. Make local edits at the point of error with targeted string replacements; do not rewrite paragraphs, restyle faithful prose, or reorganize the chapter. Every edit is traceable to a specific source passage.
+- Repair the defect and nothing else. Make local edits at the point of error with targeted string replacements; do not rewrite paragraphs, restyle faithful prose, or reorganize the chapter. The one exception is a finding that the summary departs from the source's order or adds structure the source lacks: move the paragraph back to the source's position or delete the invented framing, and record each move with the source passages that set the order. Every edit is traceable to a specific source passage.
 - Restore from the source only, in as few words as the source allows.
 - Restore a missing marker only on a view that belongs to someone other than the author, under the naming rule in `writing-rules.md`. Do not add the author's name, "the author", or a pronoun to the author's own claims: the summary states them directly. A restored claim joins its paragraph as a plain sentence. After editing, run AUTHOR CHECK COMMAND and recast any paragraph your edits pushed over the limit, unless its second reference keeps another speaker's view apart from the author's; record each such paragraph under Author naming.
-- Restorations may grow the chapter summary up to CEILING. Above CEILING, only preservation items justify the length: name them in the record. Do not pad, and do not cut faithful content to make room. The coordinator keeps the document at or under 0.55 of its source.
-- Before finalizing, record the audit: (1) every contrast marker in the source, with whether its reversal is present in the summary or why its claim was omitted entirely; (2) every number, quantity, date range, and proportion in the summary with its source location, flagging any the source does not state in that form. Then run FIDELITY CHECK COMMAND and settle each flag inside your stretch, and self-certify (b), (c), (e), (f), and (g) in one line each. Self-certification alone did not hold in earlier runs; the two lists are the audit trail.
+- Restorations may grow the chapter summary up to CEILING. Above CEILING, only preservation items, or a restored main argument, reasoning step, or piece of evidence a kept conclusion needs, justify the length: name them in the record. Do not pad, and do not cut faithful content to make room. The coordinator keeps the document at or under 0.55 of its source.
+- Before finalizing, record the audit: (1) every contrast marker in SOURCE (owned text only for a part), with whether its reversal is present in the summary or why its claim was omitted entirely; (2) every number, quantity, date range, and proportion in the summary with its source location, flagging any the source does not state in that form. Then run FIDELITY CHECK COMMAND and settle each flag inside your stretch, and self-certify (b), (c), (e), (f), and (g) in one line each. Self-certification alone did not hold in earlier runs; the two lists are the audit trail.
 
 Remediation record:
 
@@ -179,9 +180,9 @@ Source ambiguities and anything needing the original document. Do not reconstruc
 ## Coordinator gate after each remediation batch
 
 1. Diff each chapter against `Work/Summaries_preverify/` (`git diff --no-index --word-diff=plain`). Every hunk maps to an edit in the record; revert unexplained hunks.
-2. For every changed number, date, name, or quotation, open the source at the cited page marker and confirm.
+2. For every changed number, date, name, or quotation, open the source at the cited page marker or quoted passage and confirm.
 3. Read the contrast and number audits for gaps; spot-check the self-certifications.
-4. Run `python Work/check_fidelity.py` on the batch's chapters and `python Work/check_words.py`; every remaining fidelity flag is settled in a record, and the document ratio stays at or under 0.55. Run `{AUTHOR_CHECK_COMMAND}` on the batch's files. Any paragraph it still flags must appear in the record's Author naming section with the other speaker that justifies it.
+4. Run `{FIDELITY_CHECK_COMMAND}` (`<summary> <source>`) for each of the batch's chapters and `python Work/check_words.py`; every remaining fidelity flag is settled in a record, and the document ratio stays at or under 0.55. Run `{AUTHOR_CHECK_COMMAND}` on the batch's files. Any paragraph it still flags must appear in the record's Author naming section with the other speaker that justifies it.
 5. Record final counts and overage reasons; set statuses with `Work/set_status.py`; update the Status table below; commit the batch with its progress count.
 
 ## Pacing

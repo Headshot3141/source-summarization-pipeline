@@ -18,10 +18,10 @@ A sentence that is plain but clear is finished. Leave it alone. Churn is a cost,
 
 1. **Meaning does not change.** Not the claim, not its strength, not who is said to hold it, not what it is contingent on. If you cannot rephrase a sentence without shifting its meaning even slightly, leave it as it is.
 2. **Quoted material is untouchable**, byte for byte, including its punctuation and any em dashes. That includes block quotations (lines starting `> `). Edit around a quotation; do not move its boundaries.
-3. **The preservation rule in `writing-rules.md` outranks style.** You may rephrase a contrast connective but not drop or weaken the reversal, or move it to a different scope. Hedges, estimate markers, and scope words are meaning, never unnecessary adverbs. A marker on another speaker's view may not be dropped, and another speaker's view may not move into the narrative voice, where it reads as the author's. Do not combine, total, average, convert, or round any figure. Keep claims with their evidence.
+3. **The preservation rule in `writing-rules.md` outranks style.** You may rephrase a contrast connective but not drop or weaken the reversal, or move it to a different scope. Hedges, estimate markers, and scope words are meaning, never unnecessary adverbs. So are frames on hypotheticals, positions taken up for argument's sake, irony, and questions (rule (f)), and conditions, negation scope, sequence words, and reach words such as "one of the" (rule (g)). A marker on another speaker's view may not be dropped, and another speaker's view may not move into the narrative voice, where it reads as the author's. Do not combine, total, average, convert, or round any figure. Keep claims with their evidence.
 4. **Add nothing and remove no information.** Cutting filler words is in scope; cutting a clause that carries information is not.
 5. **Length is a loose constraint.** Clearer and slightly longer beats shorter and murky. Do not count words, trim to fit, or pad. The document must stay at or under 0.55 of its source; the coordinator checks that with `check_words.py` after each batch.
-6. **Structure is preserved.** `##` and `###` heading text stays exact. Split a paragraph only when it is unreadable; never merge paragraphs.
+6. **Structure is preserved.** `##` and `###` heading text stays exact. Never split or merge paragraphs; report a paragraph too long to read. Do not reorder sentences that report different speakers' views.
 
 ## What to fix, in priority order
 
@@ -29,18 +29,18 @@ A sentence that is plain but clear is finished. Leave it alone. Churn is a cost,
 2. Unclear pronoun reference. Replace the pronoun with the name only when the neighbouring text establishes it. Otherwise report it. If the pronoun refers to the author and the paragraph already names the author, recast the sentence instead (see the next item).
 3. Needless references to the author. Under the naming rule in `writing-rules.md` the summary speaks in the author's voice. Where a sentence opens "X argues", "the author notes", or a pronoun only to introduce the author's own view, recast it so the claim itself is the subject. Keep a reference where the author is an actor in the events, or where the paragraph also reports another speaker's view and the return to the author needs a marker. Never remove the marker on another speaker's view.
 4. Em dashes outside quotations.
-5. Formulaic "not X but Y".
+5. Formulaic "not X but Y", where it is only a rhetorical pattern. A real contrast keeps both halves (rule (g)); if you cannot tell which it is, leave it.
 6. Filler and formulaic transitions.
 7. Awkward passive voice where the actor is named in the text.
 8. Vague declaratives that say nothing specific.
 9. Unnecessary intensifiers ("very", "quite", "significantly", "notably"). Check rule (b) first: a word expressing degree or uncertainty stays.
 10. Monotonous rhythm: three or more sentences of the same shape, or paragraphs opening the same way.
 11. Repeated tics within a chapter.
-12. Other Guidance patterns in `writing-rules.md`: meta commentary, stock phrases, rhetorical setups, repeated conclusions, slogan endings, and forced groups of three. Where removing one would drop a judgment or claim, report it instead: you cannot check the source.
+12. Other Guidance patterns in `writing-rules.md`: meta commentary, stock phrases, rhetorical setups, repeated conclusions, slogan endings, and forced groups of three. Where removing one would drop a judgment or claim, report it instead: you cannot check the source. Never turn a question into a statement or remove a frame such as "suppose", "one might say", or "on this view": you cannot see whether the source asked the question. Report a question you suspect was added.
 
 ## What to leave alone
 
-Clear prose; long sentences that are well built; passive voice without a known actor; technical terms; hedges and scope words; quotations; names, numbers, dates, and titles; spelling variants the project has settled (see Settled decisions); anything you are unsure about. Report it instead.
+Clear prose; long sentences that are well built; passive voice without a known actor; technical terms; hedges and scope words; questions and hypothetical frames; conditions and sequence words; quotations; names, numbers, dates, and titles; spelling variants the project has settled (see Settled decisions); anything you are unsure about. Report it instead.
 
 ## Settled decisions
 
@@ -73,14 +73,17 @@ Absolute constraints, from BRIEF:
   or what it is contingent on.
 - Text inside quotation marks, and every line starting "> " (a block
   quotation), is untouchable, including its punctuation.
-- Hedges, contrast reversals, scope words, numbers, and attribution
-  markers on other speakers' views are meaning, not style. They survive
-  every edit. A preface such as "X argues" on the author's own view is
+- Hedges, contrast reversals, scope words, numbers, conditions, negation
+  scope, sequence and reach words, frames on hypotheticals, irony, and
+  questions, and attribution markers on other speakers' views are meaning,
+  not style. They survive every edit.
+- Never split or merge paragraphs, and never turn a question into a
+  statement. A preface such as "X argues" on the author's own view is
   not a protected marker (BRIEF, item 3).
 - Add nothing and remove no information.
 - Do not count words, trim to fit, or pad. A clarity edit may lengthen a
   sentence slightly.
-- Keep ## and ### heading text exactly, and do not merge paragraphs.
+- Keep ## and ### heading text exactly.
 
 Apply each fix as a targeted string replacement. Do not rewrite or
 regenerate the file. Edit only FILE and RECORD.
@@ -115,8 +118,15 @@ The agent reads the brief only through this section, so the status tables below 
 
 **Gate after each batch.**
 
-1. Run `python Work/check_words.py` and confirm the document ratio is still at or under 0.55. Run `python Work/check_style_pass.py`. It compares every summary with the archive and flags changed quotations, numbers, headings, paragraph counts, and any drop in protected hedge, contrast, or attribution markers. Then run `{AUTHOR_CHECK_COMMAND}` on the batch's files. Any paragraph it still flags must appear in the record with the other speaker's view that justifies the second reference.
-2. Investigate every flag. `NUMBER ORDER` means the same numbers were reordered; confirm each still attaches to the right claim. A protected-marker flag on "according to", "while", or "yet" may be a non-attributive or temporal sense. A flag on "according to" or "in his/her/their view" is a correct edit when the phrase only prefaced the author's own view (item 3); it is a defect when it marked another speaker's view. In an interview or edited collection, read every ADVISORY line: the checker treats every name in the unit's `Work/author_refs.json` entry as the author, so a removed interviewer marker also shows as ADVISORY, and ADVISORY lines do not fail the check.
+1. Run `python Work/check_words.py` and confirm the document ratio is still at or under 0.55. Run `python Work/check_style_pass.py`. It compares every summary with the archive and flags changed quotations, numbers, number words, block quotations, headings, and paragraph counts, and any drop, paragraph by paragraph, in a class of protected markers: hedges, contrast, reporting (attribution), negation, scope, conditionals, reach, frames (including question marks), and sequence. A swap within a class ("but" for "however") is not a loss. Then run `{AUTHOR_CHECK_COMMAND}` on the batch's files. Any paragraph it still flags must appear in the record with the other speaker's view that justifies the second reference.
+2. Investigate every flag. `NUMBER ORDER` means the same numbers were reordered; confirm each still attaches to the right claim. A `PROTECTED MARKER` flag noted "check sense" ("while", "yet", "most", "all") may be a temporal or non-scope use, and a conditional, frame, sequence, or reporting flag may be an ordinary word ("provided" as a verb, "granted", "then", "thought" as a noun); confirm against the archive. A `PROTECTED MARKER reporting` line means a reporting verb went but its subject is still in the paragraph; confirm the view is still marked. A lost reporting marker is classified by its subject:
+   - `ADVISORY` (does not fail): the subject was an author name form, "the author", or "I". The edit is correct when it removed a preface to the author's own view (item 3); confirm the claim was the author's.
+   - `ATTRIBUTION CHECK` (fails): the subject was a pronoun. Find who the pronoun meant, in the archive or the chapter source. If it was the author, the edit stands; if it was another speaker, restore the marker.
+   - `ATTRIBUTION DROP` (fails): the subject was someone other than the author. Restore the marker unless the view is still marked in the same sentence.
+   - A line ending `(now "…")` with `speaker changed` means the reporting verb stayed but its subject changed ("Marlow argues" became "Quint argues"); it fails unless the source gives the view to the new speaker.
+   - `SPEAKER ORDER` (fails): the same speakers now report in a different order within a paragraph, and `VIEW MOVED` (fails): a speaker's marker now introduces words that belonged to another speaker. Both mean a view may have changed hands; restore the original pairing unless each view still goes to its own speaker. A pronoun in these lines may show `(read as "Name")`: the checker resolved it to the nearest earlier known name in the paragraph, so confirm that reading in the archive.
+   In an interview or edited-volume unit, the first name group of the unit's entry in `Work/author_refs.json` is the unit's voice and counts as the author; every other name, the source's author included, is another speaker.
+   An `[error]` line means the checker could not compare a file (not under `Work/Summaries/`, or missing); fix the path and rerun.
 3. Read the before-and-after quotes in each record for edits touching hedges, contrasts, attribution, or numbers. Spot-check referent substitutions against the archive, and against the chapter source when the choice is not obvious from the text: an agent resolving a pronoun without the source can pick the nearest name.
 4. Correct a bad edit directly and note it in the record.
 5. Log agent reports in the Reported items table; do not fix them in this pass. They are the input to a targeted-fix pass (`passes/targeted-fix-pass.md`).
