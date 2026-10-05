@@ -10,7 +10,7 @@ This pass fixes wording and phrasing. Nothing else.
 
 ## Governing principle
 
-**The goal is prose that is concise and understandable.** `writing-rules.md` and the stop-slop guidance describe what good writing usually looks like. They are guidance toward that goal, not a checklist to satisfy. Where following a rule would make a passage harder to read, the rule yields.
+**The goal is prose that is concise and understandable.** The style guidance in `writing-rules.md` describes what good writing usually looks like. It is guidance toward that goal, not a checklist to satisfy. Where following a rule would make a passage harder to read, the rule yields.
 
 A sentence that is plain but clear is finished. Leave it alone. Churn is a cost, not a deliverable: every edit is a chance to lose meaning, so an edit has to earn its place by making the passage easier to read.
 
@@ -27,7 +27,7 @@ A sentence that is plain but clear is finished. Leave it alone. Churn is a cost,
 
 1. Tangled sentences: garden paths, stacked clauses, misattached modifiers, gapped verbs, a negation or "but not" whose scope is unclear.
 2. Unclear pronoun reference. Replace the pronoun with the name only when the neighbouring text establishes it. Otherwise report it. If the pronoun refers to the author and the paragraph already names the author, recast the sentence instead (see the next item).
-3. Repeated references to the author. The naming rule in `writing-rules.md` allows one per paragraph: the opening attribution covers the rest. Where sentence after sentence opens "X argues", "the author notes", or a pronoun, keep the first reference and recast the others so the claim itself is the subject. Keep a second reference only where the paragraph also reports another speaker's view and the return to the author needs a marker. Every claim stays attributed: a claim covered by no attribution in its paragraph keeps its own.
+3. Needless references to the author. Under the naming rule in `writing-rules.md` the summary speaks in the author's voice. Where a sentence opens "X argues", "the author notes", or a pronoun only to introduce the author's own view, recast it so the claim itself is the subject. Keep a reference where the author is an actor in the events, or where the paragraph also reports another speaker's view and the return to the author needs a marker. Never remove the marker on another speaker's view.
 4. Em dashes outside quotations.
 5. Formulaic "not X but Y".
 6. Filler and formulaic transitions.

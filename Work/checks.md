@@ -16,7 +16,7 @@ Do not trust PDF title metadata; it can be junk. Confirm title and author from t
 - Python executable and version:
 - Package versions checked against `requirements.txt`:
 - Microsoft Edge path (PDF rendering):
-- `writing-rules.md` and `stop-slop-main/SKILL.md` present:
+- `writing-rules.md` present:
 - Word-count command tested: `{WORD_COUNT_COMMAND}` on `{file}` returned `{n}`
 - Fallbacks in use (interpreter path, PDF build outside the sandbox, manual count rule):
 
@@ -28,10 +28,10 @@ Do not trust PDF title metadata; it can be junk. Confirm title and author from t
 | Reviewer | Claude Opus 5.5 (Claude Code subagent, `model: "opus"`) | | No truncation (see below) | | |
 | Verifier / later passes | Claude Opus 5.5 (Claude Code subagent, `model: "opus"`) | | No truncation (see below) | | |
 
-Default setup (plan.md, Agents). Change these rows only if the project uses another model or harness.
+Models and dispatch as set in plan.md, Agents.
 
-- How the output cap is set, and the probe that proved it (finish reasons, largest total seen, no truncated `length` finishes): Default setup, probe not needed. On 2026-09-26 an Opus 5.5 subagent in Claude Code wrote 8,669 words (160 paragraphs, end sentinel present) in one Write call, with no cut-off and no error. Claude Code imposes no cap below the model limit, and Sonnet 5.5 shares Opus 5.5's 128K-token output limit, so the result covers the summarizer. Re-probe only for another harness or a model with a lower output limit.
-- Provider exclusions or retry rules:
+- Output cap: no probe needed. On 2026-09-26 an Opus 5.5 subagent in Claude Code wrote 8,669 words (160 paragraphs, end sentinel present) in one Write call, with no cut-off and no error. Claude Code imposes no cap below the model limit, and Sonnet 5.5 shares Opus 5.5's 128K-token output limit, so the result covers the summarizer.
+- Retry rules:
 - Usage-window cost per task, measured in the pilot:
 
 ## Extraction and Validation

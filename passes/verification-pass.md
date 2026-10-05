@@ -68,7 +68,7 @@ Not a finding:
 - A faithful reproduction of an error in the source. List it in its own no-action section. A summary that silently *corrects* the source is a finding.
 - Omitted apparatus and out-of-scope sections (see the Scope Decisions in `plan.md`; the coordinator pastes the exclusions here): {SCOPE_EXCLUSIONS}
 - Compression itself. The summary targets about {RATIO} of the source. Flag an omission only when it changes or weakens the author's argument.
-- A sentence with no attribution of its own inside a paragraph that opens with the author's attribution. The naming rule in `writing-rules.md` allows one reference to the author per paragraph, and the opening covers the rest. It is a finding only when no attribution covers the claim, or when the claim follows another speaker's view without a marker for the return to the author.
+- A statement of the author's own view with no attribution. Under the naming rule in `writing-rules.md` the summary speaks in the author's voice. It is a finding only when another speaker's view reads as the author's, or when the return to the author's view after another speaker's is unmarked.
 
 ## Verifier record
 
@@ -130,7 +130,7 @@ and anything left unresolved.
 
 - Repair the defect and nothing else. Make local edits at the point of error with targeted string replacements; do not rewrite paragraphs, restyle faithful prose, or reorganize the chapter. Every edit is traceable to a specific source passage.
 - Restore from the source only, in as few words as the source allows.
-- Restore attribution at the paragraph level, under the naming rule in `writing-rules.md`: one reference to the author per paragraph. Do not add the author's name, "the author", or a pronoun to a sentence the paragraph's opening attribution already covers. A restored claim joins its paragraph as a plain sentence. After editing, run `python Work/check_author_refs.py <SUMMARY path>` and fix any paragraph your edits pushed over the limit.
+- Restore a missing marker only on a view that belongs to someone other than the author, under the naming rule in `writing-rules.md`. Do not add the author's name, "the author", or a pronoun to the author's own claims: the summary states them directly. A restored claim joins its paragraph as a plain sentence. After editing, run `python Work/check_author_refs.py <SUMMARY path>` and fix any paragraph your edits pushed over the limit.
 - Preservation is a sufficient reason to exceed the ±15% range. Record the final count, the range, and a one-line reason for any overage. The exemption covers restored source meaning only. Do not pad, and do not cut faithful content to make room.
 - Before finalizing, record the audit: (1) every contrast marker in the source, with whether its reversal is present in the summary or why its claim was omitted entirely; (2) every number, quantity, date range, and proportion in the summary with its source location, flagging any the source does not state in that form. Then self-certify (b), (c), and (e) in one line each. Self-certification alone did not hold in earlier runs; the two lists are the audit trail.
 

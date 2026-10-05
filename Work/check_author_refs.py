@@ -1,8 +1,8 @@
 """Flag summary paragraphs that refer to a source's author more than once.
 
-writing-rules.md ("Naming the author") allows one reference to the author
-per paragraph: the paragraph's opening attribution covers its later
-sentences. In an earlier run the summaries of one book named the author
+writing-rules.md ("Naming the author") has the summary speak in the
+author's voice and allows at most one reference to the author per
+paragraph, where a sentence needs it. In an earlier run the summaries of one book named the author
 about once every 80 words, mostly at the start of sentence after sentence.
 
 A reference is a name form listed in Work/author_refs.json for the file's

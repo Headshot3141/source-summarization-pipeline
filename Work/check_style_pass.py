@@ -54,6 +54,9 @@ ADVISORY = {
     "according to": "'according to X' is attribution; 'according to <measure>' is not",
     "while": "'while' may be temporal rather than concessive",
     "yet": "'yet' may mean 'so far' rather than a contrast",
+    "in his view": "dropping it is right if it only prefaced the author's own view",
+    "in her view": "dropping it is right if it only prefaced the author's own view",
+    "in their view": "dropping it is right if it only prefaced the author's own view",
 }
 MARKER_PATTERNS = {m: re.compile(r"\b" + re.escape(m) + r"\b") for m in PROTECTED}
 

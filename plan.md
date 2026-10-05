@@ -17,13 +17,13 @@ Set the summary body at about 40% of the retained substantive source word count.
 3. Clear, standalone prose.
 4. Style preferences and word targets.
 
-Report what each source argues. Do not endorse, refute, fact-check, or add outside context, and attribute claims to the author instead of stating them as fact. Keep the author's own position separate from quotations, allegations, objections, and views the author describes or rejects. Reproduce each source as printed, errors included: a summary that silently corrects its source is wrong.
+Report what each source argues. Do not endorse, refute, fact-check, or add outside context. The summary speaks in the author's voice and states the author's views directly, without "the author argues"; only views that belong to someone else (quotations, allegations, objections, and views the author describes or rejects) are marked as such. Reproduce each source as printed, errors included: a summary that silently corrects its source is wrong.
 
 ## Agents
 
 The default setup uses **Claude Sonnet 5.5 (`claude-sonnet-5-5`) at high effort for the summarizer** and **Claude Opus 5.5 (`claude-opus-5-5`) for every other role**: reviewer, merge and transition reviewer, whole-document reviewer, verifier, and later-pass agents. The coordinator is a Claude Code session (desktop app) that dispatches each agent as a subagent with the Agent tool. Summarizers use the `summarizer` agent type (`.claude/agents/summarizer.md`, which sets `model: claude-sonnet-5-5` and `effort: high`), because the Agent tool cannot set effort per call. All other roles are dispatched with `model: "opus"`. The coordinator can therefore watch every agent directly: it receives each agent's completion report, can message a running agent, and reads the plan's usage windows itself. The coordinator still checks every output file and review record before it changes a status.
 
-Opus 5.5 in Claude Code does not silently truncate long outputs. A probe on 2026-09-26 had an Opus 5.5 subagent write 8,669 words (160 paragraphs) in a single Write call. The file was complete, with its end sentinel present, and no call was cut off or returned an error. That is several times the longest output this pipeline asks of any agent. The probe tested the harness: Claude Code imposes no cap below the model's limit. Sonnet 5.5 has the same 128K-token output limit as Opus 5.5, so the result covers the summarizer too, and the output-cap probe in Step 1 is not needed with this setup. Run it again only for a different harness (such as opencode) or a model with a lower output limit.
+Opus 5.5 in Claude Code does not silently truncate long outputs. A probe on 2026-09-26 had an Opus 5.5 subagent write 8,669 words (160 paragraphs) in a single Write call. The file was complete, with its end sentinel present, and no call was cut off or returned an error. That is several times the longest output this pipeline asks of any agent. The probe tested the harness: Claude Code imposes no cap below the model's limit. Sonnet 5.5 has the same 128K-token output limit as Opus 5.5, so the result covers the summarizer too, and no output-cap probe is needed.
 
 Every draft is written by Sonnet 5.5 and reviewed by a fresh-context Opus 5.5 agent, so no agent reviews a file it wrote, and review is done by a stronger model than drafting. See Step 10 for the verification decision.
 
@@ -34,10 +34,9 @@ These shaped the rest of this plan. Read them before the pilot.
 - **Word budgets say nothing about fidelity.** In one full run, every chapter was accepted inside its budget, and an independent check with a stronger model then found material errors in most sampled chapters. All of them made the summary more assertive than its source: dropped contrast reversals, hardened hedges, attribution drift, pronouns resolved to the wrong actor, orphaned evidence, and computed totals. The reviewer had seen many of these and accepted them as omissions. The fix was an enumerable preservation rule with an audit, which now lives in `writing-rules.md` and the reviewer prompt from the start, and an independent verification pass (Step 10).
 - **Agents fact-check from memory.** Whole-document reviewers and style-pass agents "corrected" dates and names that the summaries reproduced faithfully from their sources. Every brief forbids outside knowledge, and the coordinator checks any reported error against the chapter source before acting.
 - **Every pass leaves reports behind.** Passes that may not fix what they notice log it, and the next pass resolves the log. Plan for a report-then-act sequence after the main run (Step 11), and decide with the user where to stop.
-- **The harness can truncate silently.** An agent harness (opencode) capped per-request output below the model's limit, and agents ended at the cap with no output and no error. Claude Code subagents, the default setup (see Agents), were probed and do not do this. Probe the effective cap before dispatch only when using another harness or a model with a lower output limit (Step 1).
 - **Usage windows, not chapter counts, set batch size.** Measure cost per task in the pilot and size rounds to fit.
 - **Per-chapter ranges do not bound the total.** Chapters clustered near the top of their ranges, and the overall ratio ran well above the target. Track the aggregate.
-- **Attribution applied sentence by sentence buries the prose in the author's name.** In one run, a book's summary named its author 329 times in about 27,000 words, and 124 sentences opened with the name. Agents attached "X argues" to every claim, and verification added more. Then a pronoun rule (the source never gendered the author, who wrote in the first person) was applied by replacing every "he" with the name across the files. The fix is the naming rule in `writing-rules.md`: one reference to the author per paragraph, with the opening attribution covering the sentences after it. `Work/check_author_refs.py` enforces it, and every prompt carries the source's naming convention from the start. Never fix pronouns or names by mechanical find-and-replace: recast each paragraph.
+- **Attribution applied sentence by sentence buries the prose in the author's name.** In one run, a book's summary named its author 329 times in about 27,000 words, and 124 sentences opened with the name. Agents attached "X argues" to every claim, and verification added more. Then a pronoun rule (the source never gendered the author, who wrote in the first person) was applied by replacing every "he" with the name across the files. The fix is the naming rule in `writing-rules.md`: the summary speaks in the author's voice, states the author's views without attribution, and names the author only where a sentence needs it, at most once per paragraph. Only other speakers' views are marked. `Work/check_author_refs.py` enforces the cap, and every prompt carries the source's naming convention from the start. Never fix pronouns or names by mechanical find-and-replace: recast each paragraph.
 
 ## Sources
 
@@ -46,7 +45,7 @@ These shaped the rest of this plan. Read them before the pilot.
 | 1 | `Sources/<file>` | PDF | | | 0.40 | |
 | 2 | `Sources/<file>` | EPUB | | | 0.40 | |
 
-The naming convention is how the summaries refer to each author: the name form ("Penhale", "the authors" for a co-written book), and the pronoun the source uses for the author, or "no pronoun" when the source never genders the author. Never infer a pronoun from a name. For an interview collection, give the interviewer and each interviewee. Settle it in Preflight, with the user if the source is unclear. Every prompt carries it as `AUTHOR`, and it always comes with the once-per-paragraph naming rule.
+The naming convention is how the summaries refer to each author: the name form ("Penhale", "the authors" for a co-written book), and the pronoun the source uses for the author, or "no pronoun" when the source never genders the author. Never infer a pronoun from a name. For an interview collection, give the interviewer and each interviewee. Settle it in Preflight, with the user if the source is unclear. Every prompt carries it as `AUTHOR`, and it always comes with the naming rule.
 
 For each PDF, check whether the text layer is usable. Run OCR on scanned PDFs and on the scanned pages of mixed PDFs. Text extraction can miss figures, tables, and captions, so inspect them when they support substantive claims. When a PDF's text layer is damaged (ligatures mapped to wrong characters, missing spaces) and an EPUB of the same edition exists, extract from the EPUB. Confirm titles and authors from the title page, not PDF metadata.
 
@@ -107,7 +106,6 @@ Summary.pdf
 prompts.md                          agent prompt templates for Steps 5 to 8
 writing-rules.md                    shared rules for all agents, including the preservation rule
 requirements.txt                    Python dependencies for the pipeline scripts
-start-opencode.bat                  optional: launcher that raises opencode's output cap
 plan.md
 ```
 
@@ -168,9 +166,8 @@ Repeat the table for each source, then give the grand total and overall ratio.
 - Inspect each source's quality, layout, chapter structure, notes, figures, and tables.
 - Confirm that the project scripts and their configuration entries exist. Fill in the per-source configuration in `Work/extract.py`, the `PARTS` and `INTRO` configuration in `Work/assemble.py`, and `TITLE` in `Work/build_pdf.py` (also used by `Work/build_epub.py`). Check that `Work/split_parts.py`, `Work/check_parts.py`, `Work/make_review_queue.py`, and `Work/check_words.py` work with this project's budget tables and unit keys. Run the tests: `python -m unittest discover -s Work/tests`.
 - Confirm the dependencies for extraction, OCR if needed, Markdown, templating, and PDF rendering. Install `requirements.txt` and record versions, executable paths, and any installations required, including Microsoft Edge for PDF rendering, in the Preflight section of `Work/checks.md`.
-- The template ships the `stop-slop` skill at `stop-slop-main/SKILL.md` and the shared writing rules at `writing-rules.md`. Confirm both are present, and pass `writing-rules.md` as the shared instructions for every agent. If the skill is missing, use the writing rules alone and note the fallback. The writing rules list where they override stop-slop.
+- Confirm the shared writing rules at `writing-rules.md` are present, and pass them as the shared instructions for every agent. They are the only style guide agents use: their style section is guidance toward clear prose, not a checklist.
 - **Agent limits.** Record each role's model, context window, and effective per-request output cap, and the file-size limits for agent inputs: a 29KB body-text target and a 32KB hard cap per assigned chapter or part source file (1KB = 1,000 bytes). Larger source files caused agent timeouts even when they fit the context window. For each task, estimate the full input and required output: instructions, source, any summary under review, and a safety margin.
-- **Probe the output cap (other harnesses only).** Skip this with the default setup: Claude Code subagents were probed and do not truncate, and Sonnet 5.5 and Opus 5.5 share the same 128K-token output limit (see Agents). Record the skip and cite that probe in `Work/checks.md`. For any other harness, or a model with a lower output limit: a harness can impose its own cap below the model's limit, and reasoning tokens usually share it. An agent that hits the cap ends with finish reason `length`, often with no output and no error. Run a throwaway probe task, confirm from the harness's logs or message store that no step finished at `length` and that totals exceed the old cap, and record the result. Example: opencode 1.18 caps output at 32,000 tokens unless `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX` is set before it starts; `start-opencode.bat` sets it. Do not dispatch summarizers or reviewers until the probe passes.
 - **Usage.** If the account has a usage window, record how it is read and the level at which the user stops. The default stopping level is 95% of the 5-hour window; with the default setup's subagents it takes a lot of work to fill the window, so the margin can be small. Use a different level if the user sets one. In the Claude Code desktop app the coordinator can read the plan's 5-hour and weekly windows itself (the session-management usage tool), so it can check before each batch without asking. Measure cost per task in the pilot.
 - **Naming convention.** Fill in the Naming convention column of the Sources table, and `Work/author_refs.json` (format in `Work/check_author_refs.py`): every name form the summaries will use for each author, `<slug>/<file stem>` entries for interviewees and for essay authors in an edited collection, and `not_author` phrases for other people who share an author's surname. Test `python Work/check_author_refs.py <file>` and use it as `{AUTHOR_CHECK_COMMAND}` in prompts.
 - **Word count command.** Test `python Work/count_words.py <file>` from the project root, then use that tested invocation as `{WORD_COUNT_COMMAND}` in prompts, including the executable path if `python` is not on PATH.
@@ -247,7 +244,7 @@ Run one agent per part, or per chapter if the chapter was not split, with the Su
 
 Part drafts are prose with no headings; the merge adds the chapter heading. Unsplit chapter drafts start with `## {Chapter Title}`.
 
-Keep the original drafts. Reviewers read from `Work/Drafts/` and write directly to `Work/Summaries/`, so you don't need to copy files between them. Allow one writer per file at a time. Retry failed units individually, and check completed outputs before updating their status. A provider-side failure, such as an HTTP 502 from an upstream content filter, usually succeeds on immediate retry; retry before reworking the unit, and exclude a provider that fails repeatedly if the harness allows it.
+Keep the original drafts. Reviewers read from `Work/Drafts/` and write directly to `Work/Summaries/`, so you don't need to copy files between them. Allow one writer per file at a time. Retry failed units individually, and check completed outputs before updating their status. A transient API failure, such as an HTTP 5xx error, usually succeeds on immediate retry; retry before reworking the unit.
 
 A blocked part blocks its whole chapter. Merge a split chapter only after every part is accepted, and accept the chapter once the merge and chapter-level checks pass. A partial deliverable may leave out a blocked chapter entirely if the limitation is disclosed, but a chapter with missing parts cannot be accepted. For unsplit chapters, `set_status.py part` keeps the processing-entry status and chapter status in sync.
 
@@ -255,7 +252,7 @@ If a run stalls or is interrupted, archive the affected outputs before rerunning
 
 ### 6. Chapter Review
 
-Assign one fresh-context agent per part or chapter with the Reviewer prompt in `prompts.md`. It reads the source and the original draft, writes the reviewed summary to `Work/Summaries/`, and saves a review record in the fixed format the prompt gives, including the contrast audit and number audit required by the preservation rule. In later rounds it starts from the latest reviewed summary instead of the original draft. Fresh context helps reviewers catch errors, but they can still miss errors or introduce new ones. The default setup drafts with Sonnet 5.5 at high effort and reviews with Opus 5.5 (see Agents). If you use another setup, use the strongest model you can afford for review; a cheaper model can draft.
+Assign one fresh-context agent per part or chapter with the Reviewer prompt in `prompts.md`. It reads the source and the original draft, writes the reviewed summary to `Work/Summaries/`, and saves a review record in the fixed format the prompt gives, including the contrast audit and number audit required by the preservation rule. In later rounds it starts from the latest reviewed summary instead of the original draft. Fresh context helps reviewers catch errors, but they can still miss errors or introduce new ones. Sonnet 5.5 at high effort drafts and Opus 5.5 reviews (see Agents).
 
 Build the queue with `Work/make_review_queue.py` and work through it in batches. After each batch:
 
@@ -295,7 +292,7 @@ Reuse `Work/assemble.py` with updated `PARTS` and `INTRO` configuration. The scr
 - `# Introduction`: a short note naming the sources, scope (including sections omitted by decision), and organization, with no substantive claims. Ask the user whether it should say that each source is reproduced as printed, errors included.
 - `# Part N: {Title} by {Author}`: names the source and author(s).
 - `## {Chapter Title}`, with optional `###` topic headings. Decide whether `###` headings are used for every source or none, so parts look consistent.
-- No inline citations, footnotes, or page references in final prose. Attribute claims in the prose where needed.
+- No inline citations, footnotes, or page references in final prose. Mark other speakers' views in the prose where needed; the author's own views need no attribution.
 
 Check the assembled document for missing or duplicate units, wrong order, heading errors, leftover internal markers, and leaked review notes. Run `python Work/check_author_refs.py` over every accepted summary. Compare the body word count with the aggregate target and record the overall ratio.
 
@@ -364,7 +361,7 @@ Passes used in earlier runs, in order:
 ## Status
 
 - [ ] Sources, scope, dependencies, style instructions, and each author's naming convention recorded
-- [ ] Agent models recorded (default: Sonnet 5.5 at high effort for the summarizer, Opus 5.5 in every other role); output cap probed, or skip recorded under the default setup; usage limits recorded
+- [ ] Agent models recorded (default: Sonnet 5.5 at high effort for the summarizer, Opus 5.5 in every other role); usage limits recorded
 - [ ] Page mappings and chapter segmentation confirmed
 - [ ] Raw extraction preserved, uncertain repairs reviewed, and cleaned output validated
 - [ ] Word budgets and context-size checks completed

@@ -129,10 +129,9 @@ Absolute constraints, from BRIEF:
   claim-evidence pairs survive every edit, at the source's strength.
 - Numbers and quotations change only to match the source exactly. Never
   compute a figure.
-- Restore attribution at the paragraph level: one reference to the author
-  per paragraph (the naming rule in WRITING RULES). Do not add the
-  author's name, "the author", or a pronoun to a sentence the paragraph's
-  opening attribution already covers.
+- Restore a missing marker only on another speaker's view (the naming
+  rule in WRITING RULES). Do not add the author's name, "the author", or
+  a pronoun to the author's own claims: the summary states them directly.
 - Keep ## and ### heading text and paragraph breaks.
 - Targeted string replacements only. Edit only SUMMARY and RECORD.
 

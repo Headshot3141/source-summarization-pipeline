@@ -1,10 +1,10 @@
 # Writing Rules for All Agents
 
-These are the shared writing instructions for every summarizer, reviewer, merger, and later-pass agent. Follow the `stop-slop` skill at `stop-slop-main/SKILL.md` when it is available, within the priority order and overrides below. These rules also work on their own as a fallback.
+These are the shared writing instructions for every summarizer, reviewer, merger, and later-pass agent. They are complete on their own: no other style guide applies.
 
 Priority order: fidelity to the source first, then coverage of the main arguments, then clear standalone prose, then style preferences and word targets. Where a style instruction conflicts with fidelity, follow fidelity.
 
-Report what each source argues. Do not endorse, refute, fact-check, or add outside context, and attribute claims to the author instead of stating them as fact. Keep the author's own position separate from quotations, allegations, objections, and views the author describes or rejects.
+Report what each source argues. Do not endorse, refute, fact-check, or add outside context. The summary speaks in the author's voice: a reader of a summary knows its claims and opinions are the author's, so state them directly, without "the author argues" or the author's name. Mark only views that belong to someone else (quotations, allegations, objections, and views the author describes or rejects), so that none of them reads as the author's own.
 
 ## The source as printed
 
@@ -16,7 +16,7 @@ In earlier runs, the most common errors made a summary more confident or more as
 
 - **(a) Contrast reversals.** Where the source qualifies or reverses a claim ("But", "Yet", "However", "Even so", "Nevertheless", "In truth", "Although", "On the other hand"), the reversal appears in the summary wherever the first half appears, attached to the same scope. Dropping the second half leaves the concession standing as the author's whole view.
 - **(b) Epistemic modality.** Hedges ("perhaps", "probably", "seemingly", "apparently", "tended to", "often", "not necessarily", "may have"), counterfactual mood ("would have been"), estimate markers ("it is reckoned", "it is estimated"), and scope words ("some", "most", "only") keep the source's strength. They are meaning, never "unnecessary adverbs".
-- **(c) Attribution markers.** "According to X", "purportedly", "in X's view", and free-indirect framing. Claims the source attributes to others must not move into the narrative voice, and the author's own explicit judgments ("was right to", "reasonably judged") must not be deleted. Resolve a pronoun to the actor the source means, never to the nearest noun. A paragraph's opening attribution covers its later sentences (see "Naming the author"), so a sentence inside it does not need its own "the author argues".
+- **(c) Attribution markers.** "According to X", "purportedly", "in X's view", and free-indirect framing. The narrative voice belongs to the author, so a claim the source attributes to someone else keeps its marker and never moves into it, and a view the author describes in order to reject stays marked as someone else's. The author's own explicit judgments ("was right to", "reasonably judged") must not be deleted. Resolve a pronoun to the actor the source means, never to the nearest noun. The author's own claims need no attribution (see "Naming the author").
 - **(d) Aggregation ban.** No total, average, ratio, or conversion may appear that the source does not itself state. Where the source prints components separately, keep them separate. Do not round.
 - **(e) Claim-evidence pairing.** If a claim is cut, its supporting evidence is cut with it; if evidence is kept, the claim it supports is kept. Evidence left without its claim reads as a non-sequitur even when every sentence is accurate.
 
@@ -35,46 +35,47 @@ Never paraphrase, condense, excerpt, or partially quote a block quotation, and n
 
 ## Naming the author (binding)
 
-In an earlier run, one book's summary named its author about once every 80 words. Sentence after sentence opened "X argues", "X notes", "X's view is". Two things caused it: agents applied the attribution rule sentence by sentence, and a later fix replaced every "he" with the name, because the source never gendered the author. Every sentence was accurate, and the summary was tiring to read.
+In an earlier run, one book's summary named its author about once every 80 words. Sentence after sentence opened "X argues", "X notes", "X's view is". Two things caused it: agents attributed every claim to the author, and a later fix replaced every "he" with the name, because the source never gendered the author. Every sentence was accurate, and the summary was tiring to read.
 
-- **Refer to the author once per paragraph.** Name the author in the sentence that opens the author's line of argument. That attribution covers every later sentence in the paragraph that reports the author's view. Write those sentences as the claims themselves, without a fresh "the author argues", "X notes", or "X adds".
-- **Every form counts.** The name, "the author", "the authors", a possessive ("X's view"), and a pronoun are all references. Don't swap the name for one of them to get around the limit. Rewrite instead: make the claim, the event, or the group the subject of the sentence, or join short sentences that share the author as subject. A reference to the work ("the essay", "the chapter") is one more reference, so use it sparingly.
-- **One exception: another speaker in the same paragraph.** When a paragraph also reports someone else's view (an opponent, an interviewer, a writer the author cites), the return to the author's view needs a marker. Start a new paragraph for the author's reply where you can. Where the two views have to stay together, one more brief reference to the author is allowed. Attribution clarity outranks the limit: never let a claim drift between speakers to save a name.
-- **Pronouns follow the convention set for each source** (the coordinator puts it in your prompt). Never infer gender from a name. When the source never genders its author, as is common in a book written in the first person, use no pronoun for the author and let the paragraph's opening attribution carry the sentences that follow. Never substitute the name for every pronoun.
-- **First-person passages** (memoir, an interview answer, an author's preface): frame the passage once ("In the preface, X recalls ...") and then report its content. Do not turn every "I" into the name.
-- **This does not weaken rule (c).** A sentence inside a paragraph that opens with the author's attribution is attributed. Attribution drift means moving someone else's claim into the author's voice or the narrative voice. It also means stating the author's claim as fact where no attribution covers it, such as in a paragraph that never names the author, or after another speaker's view without a marker for the return. When you restore an attribution, add it at the paragraph level, not to each sentence.
+- **State the author's views directly.** The summary's narrative voice is the author's. Write the author's claims, opinions, and judgments as plain statements, with no "the author argues", "X notes", "X believes", or "in the author's view". Do not add the author's name to show that a statement is an opinion: the source's own hedges and evaluative words carry that, and rule (b) keeps them.
+- **Name the author only where a sentence needs it,** at most once per paragraph. A sentence needs it when the author is an actor in the events ("Penhale moved to Leeds in 1930"), or to mark the return to the author's view after another speaker's view in the same paragraph. Start a new paragraph for the author's reply where you can instead.
+- **Every form counts.** The name, "the author", "the authors", a possessive ("X's view"), and a pronoun are all references. Don't swap the name for one of them to get around the limit. Rewrite instead: make the claim, the event, or the group the subject of the sentence. A reference to the work ("the essay", "the chapter") is one more reference, so use it sparingly.
+- **Attribution clarity outranks the limit.** When a paragraph reports several speakers and the author's view has to be told apart from theirs more than once, a further brief reference is allowed. Never let a claim drift between speakers to save a name.
+- **Other voices get the marker.** In an interview collection or an edited volume, the narrative voice belongs to the person the AUTHOR line in your prompt names for the unit, such as the interviewee or the essay's author. Mark everyone else, interviewer included.
+- **Pronouns follow the convention set for each source** (the coordinator puts it in your prompt). Never infer gender from a name. When the source never genders its author, as is common in a book written in the first person, use no pronoun for the author. Never substitute the name for every pronoun.
+- **First-person passages** (memoir, an author's preface): where the author is the subject of the events, name the author once and carry on. Do not turn every "I" into the name.
+- **This does not weaken rule (c).** Attribution drift means moving someone else's claim into the narrative voice, where it reads as the author's, or deleting the marker that separates another speaker's view from the author's. A plain statement of the author's own view is not drift. When you restore a missing marker, attach it to the other speaker's view, not to the author's.
 
-The check script `Work/check_author_refs.py` flags paragraphs with more than one reference. It counts names and "the author", not pronouns, so read for pronoun chains too.
+The check script `Work/check_author_refs.py` flags paragraphs with more than one reference. It counts names and "the author", not pronouns, so read for pronoun chains too. A paragraph it passes can still carry a reference it does not need: remove an "X argues" that only prefaces the author's own view.
 
 ## Style
 
-- Write concrete, direct prose. Cut filler, throat-clearing, rhetorical setups, and formulaic transitions ("It is important to note that", "When it comes to", "serves as", "plays a key role in").
-- Prefer active voice. Use passive voice when the actor is unknown, unspecified, or irrelevant, and do not invent an actor to avoid it.
-- Cut unnecessary adverbs and intensifiers. Keep words that express uncertainty, frequency, degree, attribution, or scope.
-- Do not use em dashes in summary prose. Text inside quotation marks and block quotations keeps its original punctuation, and extracted source text is never edited.
-- Avoid formulaic "not X but Y" framing. When the source draws a real contrast, state it plainly.
-- Vary sentence length naturally, without forcing it or writing awkward circumlocutions.
+The goal is prose that is clear and concise for a reader who has not read the source. Everything in this section serves that goal. A sentence that is plain but clear is finished: do not rework it to satisfy a guideline, and never make a passage awkward or roundabout to avoid a pattern listed here.
+
+### Requirements
+
 - Write in the third person. Never address the reader.
-- Attribute arguments, disputed claims, interpretations, and allegations clearly, once per paragraph for the author (see "Naming the author"). Do not present a quoted opponent's view as the author's.
+- Do not use em dashes in summary prose. Text inside quotation marks and block quotations keeps its original punctuation, and extracted source text is never edited.
+- Write in paragraphs. Use a list only where the source passage is itself a list. The only other Markdown in a summary is a reproduced block quotation (`> `).
+- State the author's views directly (see "Naming the author"). Clearly mark views that belong to others: quoted speakers, opponents, cited writers, and allegations. Do not present a quoted opponent's view as the author's.
 - Keep qualifications and distinctions. Do not turn association into causation, possibility into certainty, or a single example into a general claim.
 - Explain source-defined terms for a reader who has not read the original, using only the source.
 - Keep every sentence parseable on first reading. Compression produces garden-path sentences, dangling modifiers, gapped verbs, and pronouns whose antecedent was cut. Name the actor when a pronoun could point two ways.
-- Write in paragraphs. Use a list only where the source passage is itself a list. The only other Markdown in a summary is a reproduced block quotation (`> `).
 - Add no editorial commentary, outside fact-checking, or unsupported content.
 
-## Where these rules override stop-slop
+### Guidance
 
-The stop-slop skill is written for persuasive or explanatory prose. An attributed summary of a source needs these exceptions:
+These patterns usually make a summary less clear. Use judgment: where the plain way to say something matches one of them, say it plainly.
 
-| stop-slop says | Here |
-|---|---|
-| Remove adverbs | Cut only empty ones. Hedges and scope words are protected by (b). |
-| Avoid passive voice | Prefer active voice; keep passive where the actor is unknown. |
-| Trust readers; skip softening | Hedges state the author's epistemic position. Keep them. |
-| Cut binary contrasts | Cut only formulaic "not X but Y". Real source contrasts are protected by (a). |
-| Address the reader as "you" | Never address the reader. Third person only. |
-| Put the reader in the scene | Does not apply. |
-| Cut quotable lines | Does not apply to quoted source material. A block quotation is kept whole or dropped whole. |
-| Score the draft | Ignore the scoring table. |
-
-The goal is prose that is concise and understandable. Where applying a rule would make a passage harder to read, do not apply it. A sentence that is plain but clear is finished.
+- **Filler and throat-clearing.** Phrases that announce a point instead of making it: "It is important to note that", "It is worth noting", "When it comes to", "At its core", "The reality is", "Here's why". Make the point.
+- **Meta commentary.** "This chapter explores", "The author then turns to", "As we will see". Report what the chapter says, not that it says something. A brief signpost is fine where the source's structure itself matters to the argument.
+- **Empty emphasis.** Intensifiers that add no meaning: "really", "truly", "deeply", "fundamentally", "crucially", "importantly". Keep any word that expresses uncertainty, frequency, degree, or scope, as rule (b) requires, and keep the source's own evaluative words.
+- **Vague declaratives.** "The implications are significant", "The reasons are structural". Name the implication or the reason the source gives, or cut the sentence.
+- **Stock phrases and jargon.** "Plays a key role in", "serves as", "navigate challenges", "unpack", "landscape", "deep dive". Use the plain word, unless it is the source's own term.
+- **Formulaic contrasts and reveals.** "Not X, but Y", "The question isn't X. It's Y.", "It wasn't X. It wasn't Y. It was Z." State the point directly. When the source draws a real contrast, keep it (rule (a)) and state it plainly.
+- **Rhetorical setups and fragments.** Rhetorical questions, "Think about it:", staccato fragments for drama ("And Y. And Z."). Write complete declarative sentences.
+- **Passive voice and vague actors.** Prefer active voice when the source names the actor. Use passive voice when the actor is unknown, unspecified, or irrelevant, and never invent an actor to avoid it. The same goes for abstractions doing human verbs ("the decision emerged"): name the person if the source does, otherwise keep the source's framing.
+- **Repeated conclusions.** A sentence that restates what the paragraph or chapter has just said ("In short", "Ultimately", "Taken together"). End on the last substantive point. Keep a conclusion the source itself draws.
+- **Slogans and pull-quote endings.** A punchy closing line such as "It was a system built on fear." Besides reading as filler, it often adds emphasis or a judgment the source does not make, which is a fidelity error. Close with the source's own point, at the source's strength.
+- **Forced groups of three.** Lists of three adjectives, examples, or clauses added for cadence. Give as many items as the source supports; when the source lists three, keep all three.
+- **Monotonous rhythm.** Several sentences of the same shape in a row, or paragraphs that all open or close the same way. Vary sentence length naturally, never at the cost of clarity.
