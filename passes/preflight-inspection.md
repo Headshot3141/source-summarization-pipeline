@@ -85,7 +85,7 @@ Block quotations and epigraphs: whether other writers' words are set off as thei
 Editor's and translator's notes, bracketed insertions, introductions, prefaces and afterwords by others, captions, publisher's matter: location and quote for each kind, and whether it sits inside a chapter's text.
 
 ## 9. Extract from
-Recommended: <docling Markdown | PDF text layer | paged TXT built from the PDF | EPUB>, with the reasons: what you compared, on which pages, and what each candidate got wrong. For an OCR text layer, say whether it needs proofreading against the page images (`passes/proofread.md`): check every number and some faint print on at least three pages, and give the error count you found.
+Recommended: <docling Markdown | docling Markdown with lines rebuilt from the PDF | PDF text layer | paged TXT built from the PDF | EPUB>, with the reasons: what you compared, on which pages, and what each candidate got wrong. For a docling export with a PDF beside it, `python Work/rebuild_from_pdf.py --md <md> --pdf <pdf> --lines <a stretch of a few hundred lines> --report` counts the quotation marks, dashes, and italics that differ between the two and lists the lines the PDF does not hold in reading order: give its summary. For an OCR text layer, say whether it needs proofreading against the page images (`passes/proofread.md`): check every number and some faint print on at least three pages, and give the error count you found.
 
 ## 10. Blocking issues
 Anything that stops extraction or needs the user's decision, or "none".

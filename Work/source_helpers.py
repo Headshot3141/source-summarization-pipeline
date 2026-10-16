@@ -12,19 +12,25 @@ Line-numbered edits (line_edits) replace line_fixes keyed by text when a
 repair belongs to one line of a docling Markdown file: a line number names
 the place exactly, even where the same text occurs twice, and each helper
 checks that the line still holds what the edit expects, so a re-exported
-file stops the run instead of being edited in the wrong place.
+file stops the run instead of being edited in the wrong place. Lines
+Work/rebuild_from_pdf.py rebuilt from the PDF come in through
+build_line_edits(MD, rebuilt=rebuilt_lines(SLUG)).
 
 Run as a script to write a proofreading listing (see passes/proofread.md):
 
     python Work/source_helpers.py preproof <slug> <md file> <first line> <last line>
 """
+import html
 import json
 import os
+import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCES = os.path.join(ROOT, "Sources")
 PROOF = os.path.join(ROOT, "Work", "Proof")
+# An HTML entity in a docling export, as extract.py's md_unescape reads it.
+MD_ENTITY = re.compile(r"&(?:#\d+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);")
 
 
 def md_lines(md_name):
@@ -45,6 +51,11 @@ def skeleton(s):
     return "".join(c.lower() for c in s if c.isalnum())
 
 
+def md_entities(text):
+    """text with each HTML entity ("&amp;", "&lt;") read as its character, as extract.py reads the export."""
+    return MD_ENTITY.sub(lambda m: html.unescape(m.group(0)), text)
+
+
 def build_line_edits(md_name, *, rebuilt=None, replace=None, edits=None, swaps=(), joins=(), moves=(),
                      drops=None, quotes=()):
     """line_edits {line number: new text} for a docling Markdown source, each one checked.
@@ -54,9 +65,11 @@ def build_line_edits(md_name, *, rebuilt=None, replace=None, edits=None, swaps=(
     joined line's corrected text):
 
       rebuilt  {n: text}: line n rebuilt from a better text layer (the PDF's
-               own quotation marks, dashes, and spaces). It must keep the
-               line's letters and digits exactly (skeleton; "&amp;" in the
-               export reads as "&"), so a rebuild changes no word.
+               own quotation marks, dashes, and spaces), usually
+               rebuilt=rebuilt_lines(slug) from Work/rebuild_from_pdf.py.
+               It must keep the line's letters and digits exactly
+               (skeleton; an entity in the export, "&amp;", reads as its
+               character), so a rebuild changes no word.
       replace  {n: text} or {n: (start, text)}: line n becomes text, for
                repairs that change words (OCR misreads, a proofreading pass:
                replace=proof_fixes(...)). With start, the line as exported
@@ -100,7 +113,7 @@ def build_line_edits(md_name, *, rebuilt=None, replace=None, edits=None, swaps=(
         return new[no] if no in new else original(no)
 
     for no, text in (rebuilt or {}).items():
-        if skeleton(text) != skeleton(original(no).replace("&amp;", "&")):
+        if skeleton(text) != skeleton(md_entities(original(no))):
             stop(no, "rebuilt text changes letters or digits")
         new[no] = text
     for no, value in (replace or {}).items():
@@ -142,6 +155,23 @@ def build_line_edits(md_name, *, rebuilt=None, replace=None, edits=None, swaps=(
         above = current(no - 1) if no > 1 else ""
         new[no] = ("\n" if above.strip() else "") + quoted
     return new
+
+
+def rebuilt_lines(slug):
+    """Lines rebuilt from the PDF's text layer, {line number: text}, for build_line_edits(rebuilt=...).
+
+    Reads Work/Proof/<slug>.rebuilt.json, written by Work/rebuild_from_pdf.py
+    (only the lines the rebuild changed). build_line_edits checks each one
+    against the line it replaces, so a file built from another export of
+    the source stops the run. A missing file stops the run too: extracting
+    without it would silently keep the export's damaged lines.
+    """
+    path = os.path.join(PROOF, slug + ".rebuilt.json")
+    if not os.path.exists(path):
+        raise SystemExit("%s: not found (write it with python Work/rebuild_from_pdf.py ... --out %s)"
+                         % (path, "Work/Proof/%s.rebuilt.json" % slug))
+    with open(path, encoding="utf-8") as f:
+        return {int(n): text for n, text in json.load(f).items()}
 
 
 def _proof_paths(slug):

@@ -28,9 +28,46 @@ A paged TXT source's `build_txt` is a callable too: it takes the path of the pag
 `extract.py` rewrites every chapter file on each run, so a hand edit to `Work/Chapters/` is lost at the next extraction. Every repair, removal, block-quotation mark, and figure or table transcription goes in the config:
 
 - `line_fixes` `{whole line text: replacement}` (TXT and Markdown): for a line that is damaged the same way wherever it occurs. A key that matches no line is logged as `line-fix-unused` and printed as a warning.
-- `line_edits` `{line number: text}` (Markdown): for a repair at one place. Build it with `source_helpers.build_line_edits(md_name, rebuilt=, replace=, edits=, swaps=, joins=, moves=, drops=, quotes=)`, which checks each edit against the line it changes (its docstring lists the operations and checks). A proofreading pass against the page images (`passes/proofread.md`) comes in through `replace=proof_fixes(slug, md_name)`, which stops the run if the proofread lines have changed since.
+- `line_edits` `{line number: text}` (Markdown): for a repair at one place. Build it with `source_helpers.build_line_edits(md_name, rebuilt=, replace=, edits=, swaps=, joins=, moves=, drops=, quotes=)`, which checks each edit against the line it changes (its docstring lists the operations and checks). Lines rebuilt from the PDF come in through `rebuilt=rebuilt_lines(slug)` (below). A proofreading pass against the page images (`passes/proofread.md`) comes in through `replace=proof_fixes(slug, md_name)`, which stops the run if the proofread lines have changed since.
 - `char_map` `{from: to}`: encoding faults only, never the author's text. For example a font's private-use old-style figures, `{chr(0xF730 + i): str(i) for i in range(10)}`.
 - Figures and tables: a transcription goes in at its place in the text (`line_edits` or `line_fixes`), opening "[Visual transcription of Figure N (p. X): ...]". A table can be written as Markdown pipe rows.
+
+## Text from the PDF's text layer
+
+Two tools read the PDF with PyMuPDF character by character (font, size, position) for what a docling export or a plain text dump loses. Both take the same reading settings: `header_ymax` and `footer_ymin` (running heads and footers, in PDF points), `italic_font` (a regex on the font name; by default the font flags mark italics), `superscript_max` (the type size of note references; by default a smaller, raised character is one), and `artifact_gap` (a space glyph closer than this to its neighbours is not a word space; default 0.3 pt). To choose them, `python Work/pdf_to_paged_txt.py --pdf <file> --layout 12-14` prints each line's position, type size, share of italics, and text. Lines are read top to bottom, so a two-column page needs its own handling.
+
+**Rebuilt lines for a docling Markdown source** (`Work/rebuild_from_pdf.py`). When the export flattened quotation marks, dashes, or italics, ran words together, or mishandled line-end hyphens, but its words and structure are sound, rebuild the damaged lines rather than repairing them one by one:
+
+```text
+python Work/rebuild_from_pdf.py --md penhale-grey-harbour.md --pdf penhale-grey-harbour.pdf --lines 95-293,435-603 --header-ymax 52 --out Work/Proof/penhale-grey-harbour.rebuilt.json --report
+```
+
+Each line is found in the PDF by its letters and digits, searching on from the last line found. Its letters and digits stay exactly as docling has them; everything between them comes from the PDF. Italics are marked `*...*`, docling's spacing is kept next to a superscript note number ("Penhale. 1 The"), and each PDF line-end hyphen is kept or dropped by the book's own mid-line usage, then the dictionary, then a known prefix, then the rule that a break between two known words keeps its hyphen. Only changed lines are written. The config applies them before its other edits:
+
+```python
+from source_helpers import build_line_edits, rebuilt_lines
+
+"line_edits": lambda: build_line_edits(MD, rebuilt=rebuilt_lines(SLUG), joins=[(288, 290)], quotes=[212, 214]),
+```
+
+`build_line_edits` stops the run if a rebuilt line changes a letter or digit of the line it replaces (a re-exported file), and `rebuilt_lines` stops it if the JSON is missing. `--report` lists the lines not found (left as exported); the lines matched in pieces (a paragraph a footnote interrupts), out of order, or without their note numbers, to check against the page; the uncertain hyphen decisions; and how many quotation marks, dashes, and italics differ between the export and the PDF, which is also the evidence for "Extract from" in Preflight. Table rows, code fences, and placeholders are not rebuilt. `--no-italics` follows a typography policy without italics; `--hyphenates yes|no` overrides the detection of whether the book breaks words at line ends. Rerun the script after a re-export.
+
+**A paged text for TXT mode** (`Work/pdf_to_paged_txt.py`). When the text layer is the better text but units start and end mid-page, write a paged text from it with `build_txt` and extract in TXT mode:
+
+```python
+from pdf_to_paged_txt import FURNITURE_PATTERNS, paged_txt_builder
+
+CONFIG = {
+    ...
+    "txt": "Work/Raw/penhale-grey-harbour/paged.txt",
+    "build_txt": paged_txt_builder("penhale-grey-harbour.pdf", header_ymax=52, footer_ymin=600),
+    "paragraphs": "blank_lines",
+    "header_patterns": FURNITURE_PATTERNS,
+    "footer_patterns": FURNITURE_PATTERNS,
+}
+```
+
+The file has one form feed per PDF page. A blank line starts each block: a line set further right than the one before (a first-line indent, an indented quotation), one set further left than the rest of its block (the end of an indented quotation), a change of type size, or a vertical gap wider than `gap_factor` (default 1.2) line spacings. Lines beside a drop cap continue its paragraph. Running heads, footers, sideways text, and bare folios are prefixed `@@furniture `, so the patterns drop each one and log it as `furniture-dropped`; raise `header_scan` if a page has more than 8 of them at one end. Italics are marked `*...*` (`italics=False` for none), artifact spaces are dropped, and a line ending in a closed dash ("quay—") takes the next line's first word. Line-end hyphens are left for TXT mode to decide. Other settings: `indent` (points that start a block; default half the type size), `hanging_pages` (pages set with a hanging indent, such as endnotes, where a block starts at a line further left), and `move_run_on`. The build prints a summary that lists the pages whose first line runs a paragraph on after a page ending a sentence. TXT mode starts a new paragraph there unless `move_run_on=True` moves that last line to the next page (a footnote ending the page is never moved). Footnotes at a page foot stay there as paragraphs.
 
 ## Keys
 
