@@ -17,9 +17,12 @@ TITLE gives Summary.pdf), and Work/build_epub.py names the EPUB the same
 way. Each `#` heading (the Introduction and each part) starts a page, so the
 last page of a part is often short and the thin-page warning lists it.
 
-Printing. Headless Edge prints with --print-to-pdf. Edge has been seen to
-return from it before the file was written (the PDF appeared seconds
-later), so each attempt waits up to PDF_WAIT seconds for a complete file.
+Printing. find_edge() looks for Edge on PATH, then at its standard install
+location on Windows, macOS, or Linux (EDGE_NAMES, EDGE_PATHS); on any other
+system, put Edge on PATH. Headless Edge prints with --print-to-pdf. Edge
+has been seen to return from it before the file was written (the PDF
+appeared seconds later), so each attempt waits up to PDF_WAIT seconds for
+a complete file.
 If neither headless mode produces one, the page is printed through Edge's
 DevTools protocol (Page.printToPDF), which needs aiohttp. The build prints
 which route it used; record it in Work/checks.md.
@@ -134,10 +137,23 @@ QUOTE_RE = re.compile(r"^[ ]{0,3}>[ ]?(.*)$")
 BULLET_RE = re.compile(r"^[ ]{0,3}([-*+])[ \t]+(\S.*?)[ \t]*$")
 NUMBER_RE = re.compile(r"^[ ]{0,3}(0|[1-9]\d{0,8})\.[ \t]+(\S.*?)[ \t]*$")
 
-EDGE = [
-    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-]
+# Edge is looked for on PATH under each of these names (msedge on Windows,
+# the Linux packages' launchers), then at the standard install locations for
+# this platform (sys.platform; "~" is the user's home folder).
+EDGE_NAMES = ["msedge", "microsoft-edge", "microsoft-edge-stable"]
+EDGE_PATHS = {
+    "win32": [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    ],
+    "darwin": [
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        "~/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    ],
+    "linux": [
+        "/opt/microsoft/msedge/msedge",
+    ],
+}
 
 TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
@@ -393,14 +409,19 @@ def markdown_to_html(text):
     return markdown.markdown(markdown_source(text), extensions=MD_EXTENSIONS)
 
 
-def find_edge():
-    on_path = shutil.which("msedge")
-    if on_path:
-        return on_path
-    for path in EDGE:
+def find_edge(platform=None):
+    """Edge's executable: on PATH by EDGE_NAMES, else at platform's EDGE_PATHS (default sys.platform)."""
+    for name in EDGE_NAMES:
+        on_path = shutil.which(name)
+        if on_path:
+            return on_path
+    platform = platform or sys.platform
+    paths = [os.path.expanduser(p) for p in EDGE_PATHS.get(platform, [])]
+    for path in paths:
         if os.path.exists(path):
             return path
-    raise SystemExit("Microsoft Edge not found on PATH or in: " + ", ".join(EDGE))
+    raise SystemExit("Microsoft Edge not found on PATH (as %s) or in: %s" % (
+        ", ".join(EDGE_NAMES), ", ".join(paths) or "no standard location known for " + platform))
 
 
 def render_html(md_path=MD, html_path=HTML):

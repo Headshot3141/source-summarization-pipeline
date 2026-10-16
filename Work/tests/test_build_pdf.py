@@ -1,6 +1,6 @@
 """Tests for the PDF renderer's text escaping, the PDF text check, the
-output name, Edge printing, and the EPUB build and its text check. Run from
-the project root:
+output name, finding Edge, Edge printing, and the EPUB build and its text
+check. Run from the project root:
 
     python -m unittest discover -s Work/tests
 
@@ -495,6 +495,47 @@ class PrintPdf(unittest.TestCase):
         self.assertIn("DevTools Page.printToPDF: no Edge here", message)
         devtools.assert_called_once()
         self.assertFalse(os.path.exists(self.tmp_pdf))
+
+
+class FindEdge(unittest.TestCase):
+    """find_edge with PATH and the file system faked: names on PATH first, then the platform's locations."""
+
+    MAC = "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+    LINUX = "/opt/microsoft/msedge/msedge"
+
+    def find(self, platform, on_path=(), existing=()):
+        which = {name: "/bin/" + name for name in on_path}
+        with mock.patch.object(build_pdf.shutil, "which", which.get), \
+                mock.patch.object(build_pdf.os.path, "exists", lambda p: p in existing):
+            return build_pdf.find_edge(platform)
+
+    def test_linux_launcher_on_path_comes_before_any_location(self):
+        self.assertEqual(self.find("linux", on_path=["microsoft-edge-stable"], existing=[self.LINUX]),
+                         "/bin/microsoft-edge-stable")
+
+    def test_msedge_on_path_is_tried_first(self):
+        self.assertEqual(self.find("linux", on_path=["msedge", "microsoft-edge"]), "/bin/msedge")
+
+    def test_standard_location_on_each_platform(self):
+        win = r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+        for platform, path in [("win32", win), ("darwin", self.MAC), ("linux", self.LINUX)]:
+            with self.subTest(platform=platform):
+                self.assertEqual(self.find(platform, existing=[path]), path)
+
+    def test_mac_install_in_home_applications_folder(self):
+        home = os.path.expanduser("~/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")
+        self.assertEqual(self.find("darwin", existing=[home]), home)
+
+    def test_another_platform_location_is_not_used(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.find("linux", existing=[self.MAC])
+        self.assertEqual(str(cm.exception), "Microsoft Edge not found on PATH (as msedge, microsoft-edge, "
+                         "microsoft-edge-stable) or in: /opt/microsoft/msedge/msedge")
+
+    def test_platform_without_locations_says_so(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.find("freebsd14")
+        self.assertIn("no standard location known for freebsd14", str(cm.exception))
 
 
 class EpubText(unittest.TestCase):
