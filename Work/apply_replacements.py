@@ -8,7 +8,7 @@ before any is applied, and the list is the record.
 
 edits.json is a list of edits:
 
-    [{"id": "W-3", "path": "Work/Summaries/penhale-mills/02-the-grey-harbour.md",
+    [{"id": "W-3", "path": "Work/Summaries/penhale-grey-harbour/02-the-tide-tables.md",
       "old": "exact text now in the file", "new": "its replacement"}, ...]
 
 Paths are relative to the project root. Edits to one file apply in list

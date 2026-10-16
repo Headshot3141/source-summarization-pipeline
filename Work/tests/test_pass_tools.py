@@ -300,6 +300,34 @@ class MakePrompts(PassProject):
         self.assertIn("dispatched, not done: 3", output)
         self.assertIn("done: 1 of 3", output)
 
+    def test_items_without_keys_takes_every_chapter_with_items(self):
+        self.write("brief.md", "# Brief\n\n## Agent prompt\n\n```text\n{SUMMARY} {ITEMS}\n```\n")
+        (self.root / "Work/Prompts/fixture/items/s--01-one.md").unlink()
+        code, output = self.make("i", "pass", "--brief", "brief.md", "--items", "Work/Prompts/fixture/items")
+        self.assertEqual(code, 0, output)
+        self.assertEqual([r["key"] for r in make_prompts.read_index(self.root / "Work/Prompts/i")], ["s/ch-02"])
+        # Keys still narrow the selection, and a key without items is an error.
+        code, output = self.make("i2", "pass", "s/ch-01", "--brief", "brief.md", "--items", "Work/Prompts/fixture/items")
+        self.assertNotEqual(code, 0)
+        self.assertIn("no unit s/ch-01", output)
+        # A folder with no item files writes nothing.
+        code, output = self.make("i3", "pass", "--brief", "brief.md", "--items", "Work/Prompts/nothing/items")
+        self.assertNotEqual(code, 0)
+        self.assertIn("no chapter unit has a non-empty item file", output)
+        self.assertFalse((self.root / "Work/Prompts/i3").exists())
+
+    def test_missing_snapshot_is_an_error_even_when_the_template_does_not_use_it(self):
+        # The verification gate compares with Work/Summaries_pre<out>/; a round started without it fails here.
+        self.write("brief.md", "# Brief\n\n## Agent prompt\n\n```text\n{SUMMARY} {MODE}\n```\n")
+        code, output = self.make("verify-round2", "remediate", "--all", "--brief", "brief.md",
+                                 "--queue", "Work/verify_queue.txt", "--snapshot", "verify-round2")
+        self.assertNotEqual(code, 0)
+        self.assertIn("run Work/snapshot_summaries.py verify-round2 first", output)
+        self.assertFalse((self.root / "Work/Prompts/verify-round2").exists())
+        code, output = self.make("verify-round2", "remediate", "--all", "--brief", "brief.md",
+                                 "--queue", "Work/verify_queue.txt", "--snapshot", "snap")
+        self.assertEqual(code, 0, output)
+
     def test_mode_round1_earlier_and_notes(self):
         self.write("brief.md", "# Brief\n\n## Agent prompt\n\n```text\nMODE: {MODE}\nROUND1: {ROUND1}\n"
                                "EARLIER: {EARLIER}\nCAP: {CAP}\nRATIO: {RATIO}\nAUTHOR: {AUTHOR_CONVENTION}\n```\n")
@@ -558,7 +586,8 @@ class CollectItems(PassProject):
                       self.read(items + "s--02-two.md"))
 
         self.write("brief.md", "# Brief\n\n## Agent prompt\n\n```text\n{SUMMARY} {ITEMS} {RECORD}\n```\n")
-        code, output = call(make_prompts.main, ["valfix", "pass", "--all", "--brief", "brief.md",
+        # The documented form (validation-fix-pass.md, targeted-fix-pass.md): --items with no keys and no --all.
+        code, output = call(make_prompts.main, ["valfix", "pass", "--brief", "brief.md",
                                                 "--items", items.rstrip("/")])
         self.assertEqual(code, 0, output)
         rows = {r["key"]: r for r in make_prompts.read_index(self.root / "Work/Prompts/valfix")}

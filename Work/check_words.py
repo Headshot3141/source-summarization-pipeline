@@ -29,7 +29,7 @@ chapter) or "slug/unit_id/part k" (a part before the merge):
 
     {"s/ch-02": {"flag": "ABOVE CEILING", "max_words": 520,
                  "reason": "Restored the reversals the draft dropped; see the record.",
-                 "history": ["verify2 (2026-10-12): +40 words ..."]}}
+                 "history": ["verify-round2 (2026-10-12): +40 words ..."]}}
 
 "flag" is the kind it settles (ABOVE CEILING, UNDER, DRAFT OVER, or DRAFT
 UNDER) and "max_words" the count approved; an exception settles only that

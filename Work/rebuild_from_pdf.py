@@ -20,7 +20,7 @@ from the PDF:
 - Italic runs are marked *...*: characters whose font name matches
   --italic-font, or by default whose font flags say italic.
 - Next to a superscript note number the docling spacing is kept, so a
-  note reference stays as the export prints it ("Kropotkin. 1 Many").
+  note reference stays as the export prints it ("Penhale. 1 The").
 - A PDF line end is a space, except after a closed dash ("quay—" / "and"
   gives "quay—and") and after a line-end hyphen, which is kept or dropped
   by the book's own mid-line usage of the word, then the dictionary, then

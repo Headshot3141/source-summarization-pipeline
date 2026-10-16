@@ -80,8 +80,8 @@ phrase after the verb, as in "Penhale, however, argues the owners, not the
 union, ..."); the one after it in inverted order ('"...," says Marlow',
 "..., says the author.", but never "that ..."); after "according to"; or
 inside "in X's view". A comma or period between digits ("4,000") is not a
-clause break. A relative pronoun stands for its antecedent ("Parfit, who
-argues" and "the critics who argue" give Parfit and the critics), and an
+clause break. A relative pronoun stands for its antecedent ("Ketteridge, who
+argues" and "the critics who argue" give Ketteridge and the critics), and an
 elided subject after "and"/"but" for the speaker of the reporting marker
 before it in the sentence ("Thompson thinks X, and claims Y").
 
@@ -368,7 +368,7 @@ CLAUSE_BREAK = r"(?:[;:!?\"“”()—–]|(?<!\d)[.,]|[.,](?!\d))"
 # Sentence (and semicolon) breaks, for the words a reporting marker introduces.
 SENTENCE_BREAK = re.compile(r"[;!?]|(?<!\d)\.|\.(?!\d)")
 FULL_STOP = re.compile(r"[!?]|(?<!\d)\.|\.(?!\d)")
-# Relative pronouns: "Parfit, who argues" is Parfit's view, "the evidence,
+# Relative pronouns: "Ketteridge, who argues" is Ketteridge's view, "the evidence,
 # which suggests" the evidence's.
 RELATIVES = {"who", "which", "that"}
 CONJUNCTIONS = {"and", "but", "or", "yet"}
@@ -465,7 +465,7 @@ def marker_subject(marker, match, text):
     pieces = re.split("(%s)" % CLAUSE_BREAK, before)
     segs, breaks = pieces[0::2], pieces[1::2]
     # A relative pronoun stands for its antecedent: "the critics who argue"
-    # in the same clause, "Parfit, who argues" before the comma.
+    # in the same clause, "Ketteridge, who argues" before the comma.
     # An elided subject after "and"/"but" ("Thompson thinks X, and claims Y",
     # "the critics argue X and say Y") is that of the reporting marker
     # before it in the sentence.

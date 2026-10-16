@@ -495,7 +495,7 @@ class BlockQuotes(unittest.TestCase):
     """Block quotations are marked "> " so agents can tell them from the author's prose."""
 
     def test_colon_lead_in_to_block_citation(self):
-        paras = ["Ines Marlow describes this change:", "I used to feel that. (Marlow 1986, 82)", "The author resumes."]
+        paras = ["Ida Marlow describes this change:", "I used to feel that. (Marlow 1986, 82)", "The author resumes."]
         out = extract.mark_block_quotes(paras)
         self.assertEqual(out, [paras[0], "> I used to feel that. (Marlow 1986, 82)", "The author resumes."])
 
@@ -517,7 +517,7 @@ class BlockQuotes(unittest.TestCase):
 
     def test_citation_without_lead_in_and_epigraph(self):
         out = extract.mark_block_quotes(["For centuries the valley served. (Arden 1981, 42)",
-                                         "The river keeps its counsel so far as I can see. —Ada Penhale 1937, 16",
+                                         "The river keeps its own counsel. —Ada Penhale 1937, 16",
                                          "Her words end “here” (Smith 1990, 4)."])
         self.assertEqual([p[:2] for p in out], ["> ", "> ", "He"])
 

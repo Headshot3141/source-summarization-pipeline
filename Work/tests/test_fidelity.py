@@ -865,16 +865,16 @@ class StylePassMarkers(unittest.TestCase):
 
     # Style bug 4: a relative pronoun stands for its antecedent.
     def test_relative_pronouns_take_their_antecedent(self):
-        self.assertEqual(self.subject("Parfit, who also argues X, came.", "argue"), "Parfit")
+        self.assertEqual(self.subject("Ketteridge, who also argues X, came.", "argue"), "Ketteridge")
         self.assertEqual(self.subject("It rests on ordinary opinion, which suggests X.", "suggest"),
                          "ordinary opinion")
         self.assertEqual(self.subject("The critics who argue X are wrong.", "argue"), "The critics")
         self.assertEqual(self.subject("That suggests X.", "suggest"), "That")
-        self.assertEqual(self.check("## T\n\nParfit, who argues X, came.\n", "## T\n\nParfit argues X, and came.\n"), [])
+        self.assertEqual(self.check("## T\n\nKetteridge, who argues X, came.\n", "## T\n\nKetteridge argues X, and came.\n"), [])
         self.assertEqual(self.check("## T\n\nIt rests on ordinary opinion, which suggests X.\n",
                                     "## T\n\nIt rests on ordinary opinions, and they suggest X.\n"), [])
-        problems = self.attribution("Parfit, who argues X, came.", "Quint argues X, and came.")
-        self.assertTrue(problems[0].startswith('ATTRIBUTION DROP "argue" 1 -> 1 in paragraph 2 by "Parfit"'), problems)
+        problems = self.attribution("Ketteridge, who argues X, came.", "Quint argues X, and came.")
+        self.assertTrue(problems[0].startswith('ATTRIBUTION DROP "argue" 1 -> 1 in paragraph 2 by "Ketteridge"'), problems)
         # An elided subject is the earlier speaker's.
         self.assertEqual(self.subject("Thompson thinks it was class war, and claims that 4,000 marched."),
                          "Thompson")
@@ -984,24 +984,24 @@ The village, which believed the owners, did not strike. According to Quint, the 
 
     ESSAY_OLD = """## On Promising
 
-Bray argues that a promise binds only when it is freely given. Parfit, who argues that obligations fade with personal identity, would deny this. Bray rests his case on ordinary opinion, which suggests that a coerced promise binds no one.
+Bray argues that a promise binds only when it is freely given. Ketteridge, who argues that obligations fade with personal identity, would deny this. Bray rests his case on ordinary opinion, which suggests that a coerced promise binds no one.
 
-In Bray's view, the hard case is the deathbed promise. Bray notes that Parfit and Scanlon disagree here: Parfit holds that the promise lapses, while Scanlon maintains that it binds the heirs. Bray concludes that neither is right.
+In Bray's view, the hard case is the deathbed promise. Bray notes that Ketteridge and Halloran disagree here: Ketteridge holds that the promise lapses, while Halloran maintains that it binds the heirs. Bray concludes that neither is right.
 """
     ESSAY_NEW = """## On Promising
 
-A promise binds only when it is freely given. Parfit argues that obligations fade with personal identity, and would deny this. The case rests on ordinary opinions, and they suggest that a coerced promise binds no one.
+A promise binds only when it is freely given. Ketteridge argues that obligations fade with personal identity, and would deny this. The case rests on ordinary opinions, and they suggest that a coerced promise binds no one.
 
-The hard case is the deathbed promise. Parfit and Scanlon disagree here: Parfit holds that the promise lapses, while Scanlon maintains that it binds the heirs. Neither is right, Bray concludes.
+The hard case is the deathbed promise. Ketteridge and Halloran disagree here: Ketteridge holds that the promise lapses, while Halloran maintains that it binds the heirs. Neither is right, Bray concludes.
 """
     ESSAY_BAD = {
-        "two speakers' views swapped": ("Parfit holds that the promise lapses, while Scanlon maintains",
-                                        "Scanlon holds that the promise lapses, while Parfit maintains"),
-        "other's view into the voice": ("Parfit argues that obligations fade with personal identity, and would",
-                                        "Obligations fade with personal identity, and Parfit would"),
+        "two speakers' views swapped": ("Ketteridge holds that the promise lapses, while Halloran maintains",
+                                        "Halloran holds that the promise lapses, while Ketteridge maintains"),
+        "other's view into the voice": ("Ketteridge argues that obligations fade with personal identity, and would",
+                                        "Obligations fade with personal identity, and Ketteridge would"),
         "voice's view to another": (
-            "A promise binds only when it is freely given. Parfit argues that obligations fade with personal identity,",
-            "Parfit argues that a promise binds only when it is freely given; obligations fade with personal identity,"),
+            "A promise binds only when it is freely given. Ketteridge argues that obligations fade with personal identity,",
+            "Ketteridge argues that a promise binds only when it is freely given; obligations fade with personal identity,"),
     }
 
     def run_unit(self, stem, old, new, bad):

@@ -4,6 +4,32 @@ This project is a template for turning long source documents, such as books or e
 
 The full process is in [plan.md](plan.md). A new session reads [status.md](status.md) first.
 
+## Requirements
+
+- **Claude Code**, with access to Claude Opus 5.5 and Claude Sonnet 5.5. The coordinator is a Claude Code session, and the summarizer agent type is defined in `.claude/agents/summarizer.md`.
+- **Python 3.13**, the version the scripts were built and tested on. Install the packages with `pip install -r requirements.txt`. EbookLib is needed only for the EPUB, and aiohttp only for the fallback PDF route.
+- **Microsoft Edge**, which prints the PDF in headless mode. `Work/build_pdf.py` finds it on PATH or at its standard install location on Windows, macOS, or Linux.
+- **docling** (optional, installed separately) to convert PDF sources to Markdown before they go into `Sources/`. Export with page-break placeholders so chapters keep their page markers ([plan.md](plan.md), "Sources"). Scanned sources also need OCR.
+
+## Getting started
+
+1. Make your own private copy of this template (see "Keep run repositories private" below).
+2. Install the requirements, then run the tests from the project root: `python -m unittest discover -s Work/tests`.
+3. Put each source in `Sources/`. For a PDF, that usually means the docling Markdown export, with the PDF beside it for checking.
+4. Open the project in Claude Code and ask the session to read `status.md` and `plan.md`, then start Step 1 (Preflight). The coordinator fills in the plan's tables, the extraction configs, and `status.md` as it goes.
+
+## Keep run repositories private
+
+A run commits after every batch, so its git history holds the whole source:
+
+- `Work/Raw/` keeps a verbatim copy of each source's text, and `Work/Chapters/` holds the cleaned chapters.
+- `Work/Proof/`, the drafts, and the summaries quote or closely follow the source.
+- The prompt files in `Work/Prompts/` contain the project's absolute path on your machine, which often includes your user name.
+
+Most sources are under copyright, so do every run in a private repository: clone this repository and push it to a new private remote, or use GitHub's **Use this template** button and choose **Private**. Never run the pipeline in a public fork. GitHub forks of a public repository are always public. To contribute a change back to the template, make it in a clean checkout that holds no run files.
+
+`.gitignore` leaves out `Sources/`, the rendered PDF and EPUB, and Claude Code's local settings. The run files are not ignored, because the pipeline commits them so an interrupted session can resume and a pass can be restored.
+
 ## Priorities and voice
 
 Fidelity to the source comes first, then coverage of the main arguments, then clear prose, then style and word targets. Each source is condensed in its own order and in the author's voice, without "the author argues" on every line. Nothing from outside knowledge is added, and the source is reproduced as printed, errors included.
@@ -40,7 +66,7 @@ Source documents stay untouched in `Sources/`. Extraction writes cleaned chapter
 
 ## Operations
 
-`status.md` tells the next session where things stand. Each batch is committed with a progress count, usage is checked before each batch, and settled rulings go in `settled.md`.
+`status.md` tells the next session where things stand. Each batch is committed with a progress count (in a private repository; see above), usage is checked before each batch, and settled rulings go in `settled.md`.
 
 ## Why it's built this way
 
@@ -50,3 +76,11 @@ The rules come from earlier runs:
 - Agents "corrected" sources from memory.
 - Agents use all the extra length they are allowed.
 - Error-finding agents report far more problems than are real, so each finding is challenged before anything is fixed.
+
+## License
+
+The template is released under the MIT License; see [LICENSE](LICENSE). The Python packages in `requirements.txt` keep their own licenses. Two of them, PyMuPDF and the optional EbookLib, are under the AGPL-3.0 (PyMuPDF is also sold under a commercial license by Artifex). Their copyleft terms apply when you distribute them, or software built on them, or offer such software to others over a network. Running the pipeline on your own machine does not trigger them.
+
+## Acknowledgments
+
+Some of the style patterns in `writing-rules.md` are adapted from stop-slop by Hardik Pandya (MIT License).

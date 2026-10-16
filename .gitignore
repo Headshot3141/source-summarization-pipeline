@@ -2,7 +2,8 @@
 __pycache__/
 *.pyc
 
-# Original source documents: large binaries that never change
+# Original source documents: large binaries that never change, and usually
+# under copyright, so they never go into git
 Sources/
 
 # Rendered and intermediate outputs, rebuilt from Summary.md. The PDF and
@@ -11,3 +12,12 @@ Sources/
 /*.pdf
 /*.epub
 Work/summary.html
+
+# Claude Code's per-user settings (they often hold absolute local paths) and
+# the worktrees its sessions create
+.claude/settings.local.json
+.claude/worktrees/
+
+# Local Python environments
+.venv/
+venv/

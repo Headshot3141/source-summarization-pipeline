@@ -23,8 +23,9 @@ The flags come from check_words.evaluate(), not from its printed report.
 Usage:
     python Work/raise_exceptions.py <pass> [--snapshot DIR] [--note TEXT] [--dry-run] [--prune-stale]
 
-<pass> names the pass as in its snapshot and records (verify5 compares with
-Work/Summaries_preverify5/ and points to Work/Reviews/{slug}/verify5/);
+<pass> names the pass as in its snapshot and records (verify-round2 compares
+with Work/Summaries_preverify-round2/ and points to
+Work/Reviews/{slug}/verify-round2/);
 --snapshot DIR gives another snapshot folder, relative to the project root.
 Prints "key old new" for each change (old is "-" for a new entry).
 """

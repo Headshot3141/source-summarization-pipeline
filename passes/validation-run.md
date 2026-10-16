@@ -294,15 +294,15 @@ It also writes `tasks.json` (everything above, read by the report script), `work
 4. One `##` section per source (its part heading from PARTS in `Work/assemble.py`), then per chapter:
 
    ```markdown
-   ### 4. Penhale: The Grey Harbour
+   ### 2. Penhale: The Tide Tables
 
-   Summary: `Work/Summaries/penhale-mills/04-the-grey-harbour.md`; source: `Work/Chapters/penhale-mills/04-the-grey-harbour.md`; 3,892 words for 6,570 source words.
+   Summary: `Work/Summaries/penhale-grey-harbour/02-the-tide-tables.md`; source: `Work/Chapters/penhale-grey-harbour/02-the-tide-tables.md`; 3,892 words for 6,570 source words.
 
-   #### 4.1 (minor, clarity)
+   #### 2.1 (minor, clarity)
 
-   - **Chapter:** 4. Penhale: The Grey Harbour, `Work/Summaries/penhale-mills/04-the-grey-harbour.md`
+   - **Chapter:** 2. Penhale: The Tide Tables, `Work/Summaries/penhale-grey-harbour/02-the-tide-tables.md`
    - **Text:** "the exact summary text to search for"
-   - **Evidence (p. 51):** "the source's exact words"
+   - **Evidence (p. 31):** "the source's exact words"
    - **Problem:** One or two sentences.
    - **Suggested fix:** Replacement text (+2 words)
    - **Verification:** found by the accuracy finder; confirmed by the refuting verifier: its reason. Second opinion (material): its reason.

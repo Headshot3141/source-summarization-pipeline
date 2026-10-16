@@ -7,7 +7,7 @@ Template for proofreading a source whose text layer comes from OCR, line by line
 OCR misreads letters and digits, splits and runs words together, and silently drops faint words. The docling Markdown repeats the text layer's errors word for word. In an earlier run:
 
 - one source had 8 wrong numbers in the 44 lines of its excerpt that contained digits (years such as "1918" for 1928, "2.0.6 million" for 20.6, "192.6" for 1926);
-- another needed 186 fixes in 211 proofread lines, including more than 30 words the OCR had dropped ("the development capitalism", "a deal of its physical").
+- another needed 186 fixes in 211 proofread lines, including more than 30 words the OCR had dropped ("the closing the mills", "a deal of its winter trade").
 
 No later check can catch these. `check_fidelity.py` compares a summary with its chapter source, and a summary that faithfully repeats "1918" matches the wrong source. Only a reading against the page image finds them, so every number is checked.
 

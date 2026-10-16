@@ -10,6 +10,7 @@ replacements, and transition prompts named by slug overwrote each other.
 
 Usage (from the project root):
     python Work/make_prompts.py <out> <role> (<key> ... | --all) [options]
+    python Work/make_prompts.py <out> <role> --items DIR [<key> ...] [options]
     python Work/make_prompts.py <out> --ready
 
 <out> is the folder Work/Prompts/<out>/. <role> names the files
@@ -43,7 +44,9 @@ Units, one task each, chosen by the template and options, not by the role:
                   one task, from --set; a brief: every chapter in
                   Work/parts_manifest.json whose summary exists
   --items DIR     only units whose chapter has a non-empty item file in DIR
-                  (Work/collect_items.py), which fills ITEMS
+                  (Work/collect_items.py), which fills ITEMS. With no keys it
+                  takes every such unit (no --all needed); keys narrow it.
+                  It is an error if no unit has items: nothing to dispatch.
 
 Keys select units: slug/unit_id (a chapter, with all its parts),
 slug/unit_id/k (part k), a source slug, chunkN (a chunk), or --all.
@@ -735,8 +738,11 @@ def fields_for(u, ctx):
         return earlier
 
     if args.snapshot and summary:
-        f["EARLIER"] = snap
-        f["DIFF_COMMAND"] = lambda: "git diff --no-index --word-diff=plain %s %s" % (snap(), summary)
+        # Checked now, even when the template uses no snapshot field: a pass gated against a
+        # snapshot nobody took finds out only after its agents have edited the summaries.
+        earlier = snap()
+        f["EARLIER"] = earlier
+        f["DIFF_COMMAND"] = "git diff --no-index --word-diff=plain %s %s" % (earlier, summary)
     else:
         f["EARLIER"] = DROP
 
@@ -933,8 +939,15 @@ def main(argv=None):
             if p and p.exists() and collect_items.item_ids(p.read_text(encoding="utf-8-sig")):
                 u["items"] = rel(p)
                 kept.append(u)
+        if not kept and units and all(u.get("entry") is None for u in units):
+            fail("--items applies to chapter units only; this template's units (chunks or the boundary task) "
+                 "take no item files")
+        if not kept:
+            fail("no chapter unit has a non-empty item file in %s: nothing to dispatch. Run Work/collect_items.py "
+                 "first, or check the folder (items/_coordinator.md, if any, is the coordinator's)" % args.items)
         units = kept
-    chosen = select(units, args.keys, args.all or role == "Boundary inspector")
+    # --items already narrows the units to chapters with open items, so with no keys it takes them all.
+    chosen = select(units, args.keys, args.all or role == "Boundary inspector" or bool(args.items and not args.keys))
 
     notes_path = out_dir / NOTES
     if args.notes:

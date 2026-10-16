@@ -76,7 +76,7 @@ LIST_MARKER = re.compile(r"^(\(?(\d{1,3}|[A-Za-z]|[ivxlcdm]{1,5})[.)]|[\u2022\u2
 BLOCK_QUOTE_PREFIX = "> "
 BLOCK_CITATION = re.compile(r"[.?!…”’\]]\s*\([^()]*\d[^()]*\)$")
 # An epigraph ends with its attribution after a dash: "... and the river
-# kept its own counsel. —Ada Penhale 1937, 16".
+# keeps its own counsel. —Ada Penhale 1937, 16".
 EPIGRAPH = re.compile(r"[.?!…”’]\s+—\s?[A-Z][^—?!]{1,80}$")
 # Verse ends with its citation standing alone: "(Penhale 1982, 133)".
 CITATION_ONLY = re.compile(r"^\([^()]*\d[^()]*\)$")

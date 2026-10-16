@@ -1,6 +1,6 @@
 """Worked example of a source config (invented source; extract.py skips files starting with "_").
 
-Ada Penhale, The Grey Harbour (Northgate Press, 1937; reissued 1982; 212
+Ada Penhale, The Grey Harbour (1937; reissued 1982; 212
 PDF pages, printed page = PDF page - 8). Selected: chapters 1-3 and the
 Afterword. The editor's Foreword (pp. ix-xiv) is not Penhale's text and is
 left out (outside-chapters).
