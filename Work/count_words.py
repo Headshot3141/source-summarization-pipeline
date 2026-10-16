@@ -2,6 +2,8 @@ import pathlib
 import re
 import sys
 
+from common import parse_frontmatter, utf8_output
+
 
 def words_in_text(text):
     """Count prose words in Markdown text.
@@ -17,7 +19,8 @@ def words_in_text(text):
     removed, so a block quotation counts its words only. In a Markdown
     table (a line starting with ``|``), the separator row is skipped and
     the cell pipes are not counted, so a table counts its cell words only.
-    YAML frontmatter is not stripped, so pass body text only.
+    YAML frontmatter is not stripped, so pass body text only (``words_of``
+    strips it from a file).
     """
     kept = []
     for line in re.sub(r"<!--.*?-->", "", text, flags=re.S).splitlines():
@@ -33,11 +36,17 @@ def words_in_text(text):
 
 
 def words_of(path):
-    """Count prose words in a draft or summary file with ``words_in_text``.
+    """Count prose words in a file with ``words_in_text``, leaving out its YAML frontmatter.
 
     Reads with ``utf-8-sig`` so a UTF-8 byte order mark does not defeat
-    the heading exclusion. Intended for draft and summary files, which
-    contain summary Markdown only, with no YAML frontmatter.
+    the heading exclusion. Draft and summary files are summary Markdown
+    only. A chapter source file starts with YAML frontmatter (a ``---``
+    line, ``key: value`` lines, a closing ``---``), which is not prose:
+    counted, it added 30 to 40 words to every chapter, so an agent's count
+    disagreed with the ``word_count`` the file itself records. A leading
+    frontmatter block is therefore dropped first; the ``# Title`` line after
+    it is a heading and is not counted either, so on a chapter file this
+    gives its ``word_count``.
 
     Run from the project root:
 
@@ -45,10 +54,16 @@ def words_of(path):
 
     Prints the measured prose word count for the file.
     """
-    return words_in_text(pathlib.Path(path).read_text(encoding="utf-8-sig"))
+    text = pathlib.Path(path).read_text(encoding="utf-8-sig")
+    if text.startswith("---\n"):
+        meta, rest = parse_frontmatter(text)
+        if meta:
+            text = rest
+    return words_in_text(text)
 
 
 if __name__ == "__main__":
+    utf8_output()
     if len(sys.argv) != 2:
         raise SystemExit("usage: python Work/count_words.py <file>")
     try:

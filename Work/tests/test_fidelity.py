@@ -1,6 +1,7 @@
-"""Tests for the source-fidelity checker (check_fidelity.py) and the
-paragraph, attribution, quotation, and number-word checks in
-check_style_pass.py. Run from the project root:
+"""Tests for the source-fidelity checker (check_fidelity.py), the
+qualifier review list (check_qualifiers.py), the paragraph, attribution,
+quotation, and number-word checks in check_style_pass.py, and the quotation
+handling of check_author_refs.py. Run from the project root:
 
     python -m unittest discover -s Work/tests
 """
@@ -16,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import check_author_refs  # noqa: E402
 import check_fidelity  # noqa: E402
+import check_qualifiers  # noqa: E402
 import check_style_pass  # noqa: E402
 
 SOURCE = """---
@@ -283,8 +285,46 @@ class FidelityNames(unittest.TestCase):
         text = ("## T\n\nHowever, the mill closed. Wages fell: Nobody stayed. Unfortunately, Bray left. "
                 "Several left.\n\n- Mill closed.\n")
         self.assertEqual(flags(text, src), [])
+        # "Marlow" is no dictionary word; "Quint" is one, with no sign of
+        # being a name here, so it is only listed.
         self.assertEqual(kinds(flags("## T\n\nMarlow left. Wages fell: Quint stayed.\n", src)),
-                         [("NAME", "Marlow"), ("NAME", "Quint")])
+                         [("NAME", "Marlow"), ("OPENER", "Quint")])
+
+    # A paraphrase word opening a sentence is an OPENER, never a NAME flag.
+    def test_sentence_opening_dictionary_words_are_openers(self):
+        src = "The board fixed the rate at four percent. It converted the debt. Hodges and Bray objected.\n"
+        text = ("## T\n\nFixing the rate at four percent, the board met. Converting the debt came next: "
+                "Objecting, Bray left.\n")
+        found = flags(text, src)
+        self.assertEqual(kinds(found), [("OPENER", "Fixing"), ("OPENER", "Converting"), ("OPENER", "Objecting")])
+        self.assertEqual([f for f in found if f[0] != "OPENER"], [])
+        # A dictionary word the summary capitalizes mid-sentence elsewhere is a
+        # name, at a sentence start too, and in another paragraph.
+        found = flags("## T\n\nBray met Grey there.\n\nGrey left.\n", src)
+        self.assertEqual([(f[0], f[1], f[2]) for f in found], [("NAME", "Grey", 2), ("NAME", "Grey", 3)])
+        # So is a near spelling of a word the source always capitalizes ...
+        self.assertEqual(kinds(flags("## T\n\nHodge objected.\n", src)), [("NAME", "Hodge")])
+        # ... but not of one it also writes in lower case ("rate", "Rate").
+        self.assertEqual(kinds(flags("## T\n\nRates rose.\n", src + "Rate rises followed.\n")),
+                         [("OPENER", "Rates")])
+        # An unknown word stays a NAME.
+        self.assertEqual(kinds(flags("## T\n\nJosias objected.\n", src)), [("NAME", "Josias")])
+        # An "-ly" adverb the source capitalizes is no name to respell.
+        self.assertEqual(kinds(flags("## T\n\nStrong winds blew.\n", src + "Strongly, it objected.\n")),
+                         [("OPENER", "Strong")])
+
+    # A quotation closed before its period ends the sentence: the period
+    # after the masked quotation is not read as the period of an initial.
+    def test_opener_after_a_quotation_closed_before_its_period(self):
+        src = "The board called it “the end of the rate”. Bray left.\n"
+        self.assertEqual(flags('## T\n\nThe board called it "the end of the rate". Yet Bray left.\n', src), [])
+        self.assertEqual(check_fidelity.sentence_start('called it "x".'), True)
+        self.assertEqual(check_fidelity.sentence_start("written by J."), False)
+
+    def test_word_run_together_across_an_apostrophe_is_flagged(self):
+        src = "The Polish \u2018spring\u2019 of 1956 ended.\n"
+        for text in ("## T\n\nThe Polish\u2018spring\u2019 of 1956 ended.\n", "## T\n\nPolish'spring ended in 1956.\n"):
+            self.assertEqual(kinds(flags(text, src)), [("NAME", "Polish'spring")], text)
 
     def test_hard_wrapped_quotation_is_checked(self):
         self.assertEqual(flags("## T\n\nShe calls it “a place of quiet,\nstubborn people.”\n"), [])
@@ -401,12 +441,25 @@ class FidelityCli(unittest.TestCase):
         with redirect_stdout(out):
             code = check_fidelity.main([])
         out.flush()
-        text = raw.getvalue().decode("cp1252")
+        # utf8_output() switched the cp1252 stream to UTF-8.
+        text = raw.getvalue().decode("utf-8")
         self.assertEqual(code, 1)
-        self.assertIn('NAME para 2, line 3: "\\u0141ukasz"', text)
-        self.assertIn("\\u2192 \\u2153", text)
+        self.assertIn('NAME para 2, line 3: "\u0141ukasz"', text)
+        self.assertIn("\u2192 \u2153", text)
         self.assertIn('NUMBER para 2, line 3: "1951"', text)
         self.assertIn("checked 2 summary file(s)", text)
+
+    def test_openers_are_listed_after_flags_and_never_fail(self):
+        src = self.write("Work/Chapters/s/01-one.md", "The board fixed the rate in 1931.\n")
+        summary = self.write("Work/Drafts/s/01-one.md", "## One\n\nFixing the rate in 1931, the board met.\n")
+        code, out = self.run_main([str(summary), str(src)])
+        self.assertEqual(code, 0, out)
+        self.assertIn('OPENER para 2, line 3: "Fixing"', out)
+        self.assertIn("NAME 0; 0 flag(s); OPENER 1, not flags", out)
+        summary = self.write("Work/Drafts/s/01-one.md", "## One\n\nFixing the rate in 1931, Josias met.\n")
+        code, out = self.run_main([str(summary), str(src)])
+        self.assertEqual(code, 1, out)
+        self.assertLess(out.index("NAME para"), out.index("OPENER para"))
 
 
 class StylePassMarkers(unittest.TestCase):
@@ -445,6 +498,46 @@ class StylePassMarkers(unittest.TestCase):
             self.assertEqual(len(problems), 1, problems)
             self.assertTrue(problems[0].startswith("ADVISORY"), problems)
             self.assertIn("author preface removed", problems[0])
+        # Neutral reporting verbs stay advisory.
+        for verb in ("writes", "notes", "says", "points out"):
+            problems = self.check("## T\n\nPenhale %s that the mill failed.\n" % verb, "## T\n\nThe mill failed.\n",
+                                  ["Penhale"])
+            self.assertEqual([p[:8] for p in problems], ["ADVISORY"], (verb, problems))
+
+    # An author preface that hedges ("we think" rendered "Penhale thinks")
+    # can carry the source's own hedge: removing it fails.
+    def test_author_hedging_verb_removed_fails(self):
+        for old, marker in (("Penhale thinks the mill failed.", "think"),
+                            ("The author believes the mill failed.", "believe"),
+                            ("I suspect the mill failed.", "suspect"),
+                            ("Penhale guesses that the mill failed.", "guess"),
+                            ("Penhale doubts that the mill failed.", "doubt")):
+            problems = self.check("## T\n\n%s\n" % old, "## T\n\nThe mill failed.\n", ["Penhale"])
+            self.assertEqual(len(problems), 1, (old, problems))
+            self.assertTrue(problems[0].startswith('AUTHOR HEDGE "%s" 1 -> 0 in paragraph 2 by ' % marker),
+                            problems)
+            self.assertIn("restore a hedge", problems[0])
+        # A hedge added in its place keeps it advisory.
+        problems = self.check("## T\n\nPenhale thinks the mill failed.\n", "## T\n\nThe mill probably failed.\n",
+                              ["Penhale"])
+        self.assertEqual([p[:8] for p in problems], ["ADVISORY"], problems)
+        self.assertIn("a hedge added", problems[0])
+        # Another speaker's hedging verb is an attribution drop, as before.
+        problems = self.check("## T\n\nMarlow suspects the mill failed.\n", "## T\n\nThe mill failed.\n",
+                              ["Penhale"])
+        self.assertTrue(problems[0].startswith('ATTRIBUTION DROP "suspect"'), problems)
+        # "suppose" and "seem to" fail through their own classes, any subject.
+        problems = self.check("## T\n\nPenhale seems to accept the figures.\n", "## T\n\nPenhale accepts the figures.\n",
+                              ["Penhale"])
+        self.assertEqual(problems, ['PROTECTED MARKER hedges "seem to" 1 -> 0 in paragraph 2'])
+        self.assertEqual(self.check("## T\n\nThe mill seemed to fail.\n", "## T\n\nThe mill appeared to fail.\n"), [])
+        problems = self.check("## T\n\nI suppose the mill failed.\n", "## T\n\nThe mill failed.\n", ["Penhale"])
+        self.assertIn('PROTECTED MARKER frames "suppose" 1 -> 0 in paragraph 2', problems)
+        # The nouns are not reporting verbs.
+        self.assertEqual(self.check("## T\n\nNo doubt the suspect had a guess.\n",
+                                    "## T\n\nNo doubt the accused had a hunch.\n"), [])
+        self.assertEqual(self.check("## T\n\nIt is beyond doubt; the figures are suspect, an educated guess.\n",
+                                    "## T\n\nIt is certain; the figures are dubious, a rough estimate.\n"), [])
 
     def test_other_speaker_marker_drop_is_flagged(self):
         cases = {
@@ -665,10 +758,28 @@ class StylePassMarkers(unittest.TestCase):
                                     "## T\n\nThe government grew, and a memo and his papers survive.\n"), [])
 
     def test_hard_wrapped_quotation_is_checked(self):
+        # A hard-wrapped paragraph is itself a PARAGRAPH BREAK (assembly
+        # refuses it); the quotation in it is still compared as one.
+        def check(old, new):
+            problems = self.check(old, new)
+            self.assertIn("PARAGRAPH BREAK line 4", problems[-1])
+            return problems[:-1]
         old = '## T\n\nShe called it "a quiet,\nstubborn place" then.\n'
-        self.assertEqual(self.check(old, '## T\n\nShe called it "a quiet, stubborn\nplace" then.\n'), [])
-        problems = self.check(old, '## T\n\nShe called it "a quiet\nplace" then.\n')
+        self.assertEqual(check(old, '## T\n\nShe called it "a quiet, stubborn\nplace" then.\n'), [])
+        problems = check(old, '## T\n\nShe called it "a quiet\nplace" then.\n')
         self.assertEqual(problems, ['QUOTE CHANGED: "a quiet, stubborn place" -> "a quiet place"'])
+
+    # A lost blank line is invisible to the word checks but merges paragraphs.
+    def test_lost_blank_lines_fail(self):
+        old = "## One\n\nFirst.\n\nSecond.\n\n### Sub\n\nText.\n"
+        problems = self.check(old, "## One\n\nFirst.\nSecond.\n\n### Sub\nText.\n")
+        breaks = [p for p in problems if p.startswith("PARAGRAPH BREAK")]
+        self.assertEqual(breaks, [
+            "PARAGRAPH BREAK line 4: two text lines without a blank line between them "
+            "(they render as one paragraph)",
+            "PARAGRAPH BREAK line 7: heading without a blank line around it"])
+        ok = "## One\n\nThe list:\n\n- one\n- two\n\n> A quotation\n> runs on.\n\nText.\n"
+        self.assertEqual(self.check(ok, ok.replace("Text.", "Prose.")), [])
 
     def subject(self, text, marker="claim"):
         pattern = dict(check_style_pass.CLASS_PATTERNS["reporting"])[marker]
@@ -952,14 +1063,33 @@ class StylePassCli(unittest.TestCase):
         self.assertNotIn("HEADINGS CHANGED", out.getvalue())
 
     def test_unencodable_report_text_is_escaped(self):
-        # Bug 1 (style pass): a cp1252 stdout no longer raises on Ł.
+        # Bug 1 (style pass): a cp1252 stdout no longer raises on Ł; it is
+        # switched to UTF-8 (common.utf8_output).
         self.write("Archive/s/01-one.md", "## One\n\nIt grew, Łukasz says.\n".encode("utf-8"))
         self.write("Summaries/s/01-one.md", "## One\n\nIt grew.\n".encode("utf-8"))
         raw = io.BytesIO()
         out = io.TextIOWrapper(raw, encoding="cp1252", newline="\n")
         self.assertEqual(self.run_main(out), 1)
         out.flush()
-        self.assertIn(b'by "\\u0141ukasz"', raw.getvalue())
+        self.assertIn('by "Łukasz"'.encode("utf-8"), raw.getvalue())
+
+    def test_author_hedge_and_lost_blank_line_flag_the_file(self):
+        refs = self.root / "author_refs.json"
+        refs.write_text(json.dumps({"refs": {"s": ["Penhale"]}}), encoding="utf-8")
+        saved = check_author_refs.CONFIG
+        check_author_refs.CONFIG = refs
+        try:
+            self.write("Archive/s/01-one.md", b"## One\n\nPenhale thinks the mill failed.\n\nIt closed.\n")
+            self.write("Summaries/s/01-one.md", b"## One\n\nThe mill failed.\n\nIt closed.\n")
+            out = io.StringIO()
+            self.assertEqual(self.run_main(out), 1, out.getvalue())
+            self.assertIn('AUTHOR HEDGE "think" 1 -> 0 in paragraph 2 by "Penhale"', out.getvalue())
+            self.write("Summaries/s/01-one.md", b"## One\n\nPenhale argues the mill failed.\nIt closed.\n")
+            out = io.StringIO()
+            self.assertEqual(self.run_main(out), 1, out.getvalue())
+            self.assertIn("PARAGRAPH BREAK line 4", out.getvalue())
+        finally:
+            check_author_refs.CONFIG = saved
 
     def test_target_outside_summaries_is_reported_cleanly(self):
         self.write("Archive/s/01-one.md", b"## One\n\nIt grew.\n")
@@ -973,6 +1103,121 @@ class StylePassCli(unittest.TestCase):
         self.assertIn("[error] s/02-two.md not found", out.getvalue())
         self.assertIn("[unchanged] s/01-one.md", out.getvalue())
         self.assertNotIn("Traceback", out.getvalue())
+
+
+HARBOUR = """---
+title: "The Grey Harbour"
+---
+
+# The Grey Harbour
+
+<!-- page 3 -->
+The modern state regularly taxes the harbour trade to pay for its growing fleet. Penhale wrote letters.
+
+<!-- page 4 -->
+Some merchants, for example the Marlow brothers, refused to pay the new harbour tax <!-- page 5 --> that spring.
+
+It was not only the merchants but also the fishermen who protested against the harbour tax.
+
+> The harbour is ours, and the sea is ours, and the tax is theirs alone. (Penhale 1937, 4)
+"""
+
+
+def qualifiers(summary, source=HARBOUR, pronouns=False):
+    return [(f[0], f[1], f[2][0]) for f in check_qualifiers.check(summary, source, pronouns)]
+
+
+class Qualifiers(unittest.TestCase):
+    def test_dropped_qualifier_with_its_word_kept_is_listed(self):
+        found = check_qualifiers.check(
+            "## The Grey Harbour\n\nThe state taxes the harbour trade to pay for its growing fleet.\n", HARBOUR)
+        self.assertEqual([f[2][0] for f in found], ['missing "regularly" (qualifies "taxes")',
+                                                    'missing "modern" (qualifies "state")'])
+        self.assertEqual(found[0][1], 3)
+        self.assertEqual(found[0][2][1], "summary: The state taxes the harbour trade to pay for its growing fleet.")
+        self.assertEqual(found[0][2][2], "source, page 3: The modern state regularly taxes the harbour trade to "
+                                         "pay for its growing fleet.")
+
+    def test_example_marker_and_page_range(self):
+        found = check_qualifiers.check("## T\n\nThe Marlow brothers refused to pay the new harbour tax that "
+                                       "spring.\n", HARBOUR)
+        self.assertEqual([f[2][0] for f in found], ['missing "for example" (qualifies "marlow")'])
+        self.assertTrue(found[0][2][2].startswith("source, pages 4-5: Some merchants, for example"), found)
+
+    def test_kept_qualifier_synonym_or_lost_word_is_not_listed(self):
+        for summary in (
+                # Kept, or kept in other words of its group.
+                "The modern state regularly taxes the harbour trade to pay for its growing fleet.",
+                "The present-day state regularly taxes the harbour trade to pay for its growing fleet.",
+                "Some merchants, for instance the Marlow brothers, refused to pay the new harbour tax.",
+                # The word "for example" qualifies ("Marlow") is gone, so its loss is no slip.
+                "Some merchants refused to pay the new harbour tax that spring.",
+                # "not only ... but" recast.
+                "The merchants and also the fishermen protested against the harbour tax.",
+                # Too short to align.
+                "The state taxes trade.",
+                # Block quotations are not read.
+                "> The harbour is ours, and the sea is ours, and the tax is theirs.",
+        ):
+            self.assertEqual(qualifiers("## T\n\n%s\n" % summary), [], summary)
+
+    def test_references_outside_the_summary_are_listed(self):
+        text = ("---\nsource_slug: \"s\"\n---\n## T\n\nAs we have seen, the tax failed (see above).\n\n"
+                "The following chapter returns to it; Chapter IV and Part 2 give the figures.\n\n"
+                "She called it \u201cthe tax of the preceding chapter\u201d.\n\n### Part 3\n\n"
+                "> As we have seen, it failed.\n")
+        found = [f for f in qualifiers(text) if f[0] == "REFERENCE"]
+        self.assertEqual([(f[1], f[2].split(" | ")[0]) for f in found], [
+            (6, '"As we have seen"'), (6, '"(see above)"'), (8, '"The following chapter"'),
+            (8, '"Chapter IV"'), (8, '"Part 2"')])
+
+    def test_spelling_variants_unless_the_source_has_both(self):
+        text = ("## T\n\nThe merchants organised a boycott. The businessmen paid nothing.\n\n"
+                "They organized a second boycott, and the business men won. The civil war and the "
+                "civil-war debts mattered.\n")
+        found = [f for f in qualifiers(text, "The merchants organised a boycott.\n") if f[0] == "VARIANT"]
+        self.assertEqual([f[2] for f in found], ['"organised" (line 3), "organized" (line 5)',
+                                                 '"businessmen" (line 3), "business men" (line 5)'])
+        both = "They organised one and organized another; businessmen are business men.\n"
+        self.assertEqual([f for f in qualifiers(text, both) if f[0] == "VARIANT"], [])
+        self.assertEqual(check_qualifiers.spelling_key("labour"), check_qualifiers.spelling_key("labor"))
+        self.assertEqual(check_qualifiers.spelling_key("instil"), check_qualifiers.spelling_key("instill"))
+        self.assertEqual(check_qualifiers.spelling_key("centre"), check_qualifiers.spelling_key("center"))
+        self.assertEqual(check_qualifiers.spelling_key("co-operate"), check_qualifiers.spelling_key("cooperate"))
+
+    def test_pronoun_list_only_on_request(self):
+        summary = "## T\n\nPenhale wrote letters. It regularly taxes the harbour trade to pay for its growing fleet.\n"
+        self.assertEqual([f for f in qualifiers(summary) if f[0] == "PRONOUN"], [])
+        found = [f for f in qualifiers(summary, pronouns=True) if f[0] == "PRONOUN"]
+        self.assertEqual([f[2] for f in found], ['"the modern state" -> "it"'])
+
+    def test_cli_lists_without_failing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "01-one.md"
+            src.write_text(HARBOUR, encoding="utf-8")
+            summary = Path(tmp) / "summary.md"
+            summary.write_text("## T\n\nThe state taxes the harbour trade to pay for its growing fleet.\n",
+                               encoding="utf-8")
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = check_qualifiers.main([str(summary), str(src)])
+            self.assertEqual(code, 0)
+            self.assertIn('QUALIFIER line 3: missing "regularly" (qualifies "taxes")\n    summary: ', out.getvalue())
+            self.assertIn("listed 2 item(s) in 1 summary file(s): QUALIFIER 2, REFERENCE 0, VARIANT 0;",
+                          out.getvalue())
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(check_qualifiers.main([str(summary)]), 1)
+                self.assertEqual(check_qualifiers.main([str(summary), str(Path(tmp) / "missing.md")]), 1)
+
+
+class AuthorRefsQuotes(unittest.TestCase):
+    # A straight-quoted quotation hard-wrapped across lines is still skipped
+    # whole; its quotes no longer pair across the text between quotations.
+    def test_hard_wrapped_quotation_is_skipped_whole(self):
+        pattern = [check_author_refs.ref_pattern(["Penhale"])]
+        text = 'Penhale wrote "a quiet\nplace" and later Penhale said "no".\n'
+        self.assertEqual(check_author_refs.flagged_paragraphs(text, pattern), [(1, ["Penhale", "Penhale"])])
+        self.assertEqual(check_author_refs.flagged_paragraphs('Penhale wrote "as Penhale\nsaid".\n', pattern), [])
 
 
 if __name__ == "__main__":

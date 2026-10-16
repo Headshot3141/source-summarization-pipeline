@@ -3,7 +3,8 @@
 Summaries reproduce numbers, names, and quotations exactly as the source
 prints them (errors included), never compute totals, averages, or rounded
 figures, and reproduce a block quotation whole or not at all. This script
-compares a summary with its source and flags four kinds of text:
+compares a summary with its source and flags four kinds of text (and lists
+a fifth, OPENER, that is not a flag):
 
   NUMBER      a digit token (thousands separators removed, a trailing % or
               ordinal suffix ignored) that does not occur as a number in the
@@ -49,12 +50,18 @@ compares a summary with its source and flags four kinds of text:
               match is case-sensitive. At a sentence start (the start of a
               line, after . ! ? or an opening quote) and after ":", where a
               capital carries no signal, the word is flagged only if the
-              source lacks it in every case ("Josias" for "Josiah", "Hodge"
-              for "Hodges") and it is not a common opener (SENTENCE_OPENERS:
-              The, However, In, Nobody, One ...) or an "-ly" adverb followed
-              by a comma. A straight quote (" or ') opens a quotation only
-              after the start, a space, an opening bracket, or a dash, so the
-              word after a closing quote ('"the end" Smyth') or a trailing
+              source lacks it in every case, it is not a common opener
+              (SENTENCE_OPENERS: The, However, In, Nobody, One ...) or an
+              "-ly" adverb followed by a comma, and it is a name by one of
+              these signs: the dictionary (pyspellchecker) does not know it
+              in lower case ("Josias" for "Josiah"); the summary capitalizes
+              it mid-sentence elsewhere; or it is a near spelling (same first
+              letter, similarity at least NEAR_NAME) of a word the source
+              always capitalizes ("Hodge" for "Hodges", "Thompson" for
+              "Thomson"). Otherwise it is an OPENER. A straight quote (" or
+              ') opens a quotation only after the start, a space, an opening
+              bracket, or a dash, so the word after a closing quote ('"the
+              end" Smyth') or a trailing
               possessive apostrophe ("workers' Onion", "Jones' Mull") is
               mid-sentence. A period after an abbreviation (Mr. Mrs. Dr. St.
               Prof. Gen. Rev. e.g. ..., the list in split_parts.ABBREVIATIONS)
@@ -63,7 +70,20 @@ compares a summary with its source and flags four kinds of text:
               and invented actors. Text inside quotations is skipped (QUOTE
               covers it). Allowed: the author and speaker name forms in
               Work/author_refs.json for the file's source or unit, and
-              ALLOWED_NAMES below.
+              ALLOWED_NAMES below. A word run together with the next across
+              an apostrophe ("Polish'spring" for "Polish 'spring'") is one
+              word the source lacks, so it is flagged as it stands.
+  OPENER      a capitalized dictionary word at a sentence start that the
+              source lacks in every case and that shows no sign of being a
+              name: almost always a paraphrase word ("Fixing the rate, ...",
+              "Converting the debt, ..."). In one run such words were 57 of
+              67 NAME flags at assembly and 74 of 83 at completion; on that
+              run's final summaries this check gives 15 NAME flags and 62
+              OPENER lines where it gave 84 NAME flags before. Listed
+              after the flags so a reader can glance for a name the
+              dictionary happens to know ("Thompson" invented outright, only
+              ever at a sentence start); not counted as a flag, and no
+              record needs to settle it.
 
 Both texts are normalized first: frontmatter and HTML comments removed, curly
 and straight quotes and apostrophes unified (single and double alike, so a
@@ -98,23 +118,26 @@ stale and are not checked (as in Work/check_words.py). Drafts are checked by pas
 author_refs.json comes from the summary path (Work/Drafts/<slug>/...,
 Work/Summaries/<slug>/...).
 
-Output: one line per flag,
+Output: one line per flag, then one per OPENER,
     KIND para N, line L: "offending text" | context snippet
 (paragraphs are blank-line-separated blocks of the summary, headings
 included; BLOCKQUOTE lines name PARTIAL or ALTERED after the kind), then a
-count per kind. In manifest mode a summary whose source file is missing is
+count per kind, and the OPENER count when there are any ("; OPENER n, not
+flags"). In manifest mode a summary whose source file is missing is
 printed as "MISSING source <source> for <summary>" and counted as a flag
 ("MISSING n" joins the counts). Exit status is 1 when anything is flagged,
-else 0.
+else 0; OPENER lines never change it.
 
 Known false positives (and gaps):
   - NAME: a capitalized word after a sentence that ends with an abbreviation
     or a single letter ("... in the U.S. Then"), or after "no." / "ed.", is
     checked as if mid-sentence. A word capitalized in the summary but not in
     the source (a term used as a title) is flagged. A sentence-start word
-    that is neither in the source nor a listed opener ("Following the strike")
-    is flagged; a respelled name that matches a source word in another case
-    ("Mill" for "mill") is not flagged at a sentence start.
+    that the dictionary does not know and the source lacks is flagged even
+    when it is no name (a rare or technical word). A respelled name that
+    matches a source word in another case ("Mill" for "mill") is not
+    flagged at a sentence start, and one the dictionary knows that is not
+    near any word the source capitalizes is only an OPENER.
   - NUMBER: "one" used as a pronoun ("one of them", "no one") is checked as
     a number. "first", "second", "third"
     alone are not checked; "one fifth" is read as 1 and 5, not a fraction;
@@ -129,17 +152,25 @@ import json
 import re
 import sys
 import unicodedata
-from difflib import SequenceMatcher
+from difflib import SequenceMatcher, get_close_matches
+from functools import cache
 from pathlib import Path
 
 import check_author_refs
-from common import ROOT, parse_frontmatter, strip_comments
+from common import ROOT, parse_frontmatter, strip_comments, utf8_output
 # Importing split_parts has no side effects (its main() runs only as a
 # script) and needs no PDF libraries: only common and count_words.
 from split_parts import ABBREVIATIONS
 
 PARTS_MANIFEST = ROOT / "Work" / "parts_manifest.json"
 KINDS = ("NUMBER", "QUOTE", "BLOCKQUOTE", "NAME")
+# Listed after the flags, never counted as one (see the docstring).
+OPENER = "OPENER"
+# How alike a sentence-start dictionary word and a word the source always
+# capitalizes must be (difflib ratio, same first letter) for the word to be
+# read as a respelled name: "Hodge"/"Hodges" 0.91, "Smyth"/"Smith" 0.8,
+# "Fixing"/"Fishing" 0.77.
+NEAR_NAME = 0.8
 
 # Capitalized words that never need source support. "I" is the pronoun;
 # "Chapter" and "Part" let a summary refer to the book's own divisions.
@@ -371,6 +402,14 @@ class Source:
         self.words_lower = {w.lower() for w in WORD.findall(self.text)}
         self.names = {POSSESSIVE.sub("", w) for w in WORD.findall(self.text)}
         self.names_lower = {w.lower() for w in self.names}
+        # Words the source always capitalizes, by first letter, for reading a
+        # dictionary word at a summary sentence start as a respelled name.
+        # Openers and "-ly" adverbs ("Fifthly", "Fourthly") are no names.
+        self.capitalized = {}
+        for w in self.names:
+            if (w[:1].isupper() and w.lower() not in self.names and w not in SENTENCE_OPENERS
+                    and not w.endswith("ly")):
+                self.capitalized.setdefault(w[0].lower(), []).append(w)
 
 
 # ------------------------------------------------------------------- numbers
@@ -650,7 +689,8 @@ def sentence_start(before):
     possessive apostrophe ("workers' Onion") is mid-sentence. A period that
     ends an abbreviation (Mr. Dr. St. e.g. ..., split_parts.ABBREVIATIONS) or
     a single initial (J.) is not a sentence end, so the name after it is
-    checked. The pronoun "I." is not read as an initial."""
+    checked. The pronoun "I." is not read as an initial, nor is a quotation
+    closed before its period ('"x".', as mask_quotes leaves '"the end".')."""
     line = before.split("\n")[-1].rstrip()
     if re.fullmatch(r"\s*(?:[-*]|\d+[.)])?", line):
         return True
@@ -661,35 +701,70 @@ def sentence_start(before):
     last = line.split()[-1]
     if last.endswith("."):
         core = re.sub(r"[^A-Za-z]", "", last)
-        if core.lower() in ABBREVIATIONS or (len(core) == 1 and core != "I"):
+        if core.lower() in ABBREVIATIONS or (len(core) == 1 and core != "I" and last[-2:-1].isalpha()):
             return False
     return True
 
 
-def name_flags(text, src, allowed):
-    """[(offending text, context)] for capitalized words absent from the
-    source; adjacent flagged words are reported as one run."""
+@cache
+def _dictionary():
+    """The pyspellchecker English dictionary, loaded on first use (as in
+    Work/extract.py), so importing this module stays cheap."""
+    from spellchecker import SpellChecker
+    return SpellChecker()
+
+
+def in_dictionary(word):
+    """True if the dictionary knows the word in lower case. A word run
+    together across an apostrophe ("polish'spring") is not known."""
+    return bool(_dictionary().known([word.lower()]))
+
+
+def mid_sentence_capitals(text):
+    """Words (possessive removed) that text capitalizes mid-sentence, outside
+    quotations: names, by the summary's own usage."""
+    norm = re.sub(r"[’‘]", "'", mask_quotes(text))
+    return {POSSESSIVE.sub("", m.group()) for m in WORD.finditer(norm)
+            if m.group()[0].isupper() and not sentence_start(norm[:m.start()])}
+
+
+def near_name(word, src):
+    """True if word is a near spelling of a word the source always
+    capitalizes: same first letter, similarity at least NEAR_NAME."""
+    return bool(get_close_matches(word, src.capitalized.get(word[0].lower(), []), n=1, cutoff=NEAR_NAME))
+
+
+def name_flags(text, src, allowed, named=frozenset()):
+    """[(kind, offending text, context)] for capitalized words absent from
+    the source: NAME, or OPENER for a sentence-start dictionary word with no
+    sign of being a name (see the docstring). named: words the summary
+    capitalizes mid-sentence anywhere (mid_sentence_capitals). Adjacent
+    words of one kind are reported as one run."""
     flags = []
     norm = re.sub(r"[’‘]", "'", mask_quotes(text))
     for m in WORD.finditer(norm):
         word = POSSESSIVE.sub("", m.group())
         if not word[0].isupper() or word in allowed or word in src.names:
             continue
+        kind = "NAME"
         # At a sentence start (or after ":") capitals carry no signal, so the
         # word is flagged only if the source lacks it in any case and it is
-        # not a common opener or a "-ly," adverb ("Unfortunately, ...").
-        if sentence_start(norm[:m.start()]) and (
-                word.lower() in src.names_lower or word in SENTENCE_OPENERS
-                or (word.endswith("ly") and norm[m.end():m.end() + 1] == ",")):
-            continue
-        flags.append((word, m.start(), m.end()))
+        # not a common opener or a "-ly," adverb ("Unfortunately, ..."); a
+        # dictionary word is a NAME only with a sign that it is one.
+        if sentence_start(norm[:m.start()]):
+            if (word.lower() in src.names_lower or word in SENTENCE_OPENERS
+                    or (word.endswith("ly") and norm[m.end():m.end() + 1] == ",")):
+                continue
+            if in_dictionary(word) and word not in named and not near_name(word, src):
+                kind = OPENER
+        flags.append((kind, word, m.start(), m.end()))
     runs = []
-    for word, start, end in flags:
-        if runs and re.fullmatch(r"\s+", norm[runs[-1][2]:start]):
-            runs[-1] = (runs[-1][0] + norm[runs[-1][2]:start] + word, runs[-1][1], end)
+    for kind, word, start, end in flags:
+        if runs and runs[-1][0] == kind and re.fullmatch(r"\s+", norm[runs[-1][3]:start]):
+            runs[-1] = (kind, runs[-1][1] + norm[runs[-1][3]:start] + word, runs[-1][2], end)
         else:
-            runs.append((word, start, end))
-    return [(w, snippet(norm, s, len(w))) for w, s, _ in runs]
+            runs.append((kind, word, start, end))
+    return [(k, w, snippet(norm, s, len(w))) for k, w, s, _ in runs]
 
 
 def author_forms(summary_path):
@@ -720,6 +795,10 @@ def check(summary_raw, source_raw, allowed=frozenset()):
     paras = blocks(text)
     allowed = set(allowed) | ALLOWED_NAMES
     found, seen = [], set()
+    named = set()
+    for _, block in paras:
+        if not is_quote_block(block):
+            named |= mid_sentence_capitals("\n".join(ln for ln in block.split("\n") if not HEADING_LINE.match(ln)))
 
     def add(kind, offending, n, line, context):
         key = (kind, offending, n)
@@ -758,10 +837,10 @@ def check(summary_raw, source_raw, allowed=frozenset()):
         for token, pos in number_flags(ntext, src):
             add("NUMBER", token, i + 1, line, snippet(ntext, pos, len(token)))
         if not quoted:
-            for word, context in name_flags(body, src, allowed):
-                add("NAME", word, i + 1, line, context)
-    order = {k: n for n, k in enumerate(KINDS)}
-    found.sort(key=lambda f: (f[2], order[f[0]]))
+            for kind, word, context in name_flags(body, src, allowed, named):
+                add(kind, word, i + 1, line, context)
+    order = {k: n for n, k in enumerate(KINDS + (OPENER,))}
+    found.sort(key=lambda f: (f[0] == OPENER, f[2], order[f[0]]))
     return found
 
 
@@ -773,7 +852,7 @@ def report(summary, source):
     print("== %s vs %s" % (summary.as_posix(), source.as_posix()))
     for kind, offending, n, line, context in flags:
         print('%s para %d, line %d: "%s" | %s' % (kind, n, line, offending, context))
-    counts = {k: 0 for k in KINDS}
+    counts = {k: 0 for k in KINDS + (OPENER,)}
     for f in flags:
         counts[f[0]] += 1
     return counts
@@ -808,10 +887,7 @@ def manifest_pairs():
 
 
 def main(argv):
-    if hasattr(sys.stdout, "reconfigure"):
-        # A console or pipe may not encode every character (cp1252 on
-        # Windows): escape what it cannot rather than stop the report.
-        sys.stdout.reconfigure(errors="backslashreplace")
+    utf8_output()
     missing = 0
     if len(argv) == 2:
         pairs = [(Path(argv[0]), Path(argv[1]))]
@@ -822,13 +898,14 @@ def main(argv):
         pairs, missing = manifest_pairs()
     else:
         sys.exit("usage: python Work/check_fidelity.py [<summary> <source>]")
-    totals = {k: 0 for k in KINDS}
+    totals = {k: 0 for k in KINDS + (OPENER,)}
     for summary, source in pairs:
         for kind, n in report(summary, source).items():
             totals[kind] += n
-    total = sum(totals.values()) + missing
+    total = sum(totals[k] for k in KINDS) + missing
     counts = ["%s %d" % (k, totals[k]) for k in KINDS] + (["MISSING %d" % missing] if missing else [])
-    print("checked %d summary file(s): %s; %d flag(s)" % (len(pairs), ", ".join(counts), total))
+    openers = "; %s %d, not flags" % (OPENER, totals[OPENER]) if totals[OPENER] else ""
+    print("checked %d summary file(s): %s; %d flag(s)%s" % (len(pairs), ", ".join(counts), total, openers))
     return 1 if total else 0
 
 

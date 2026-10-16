@@ -41,7 +41,7 @@ import json
 import re
 import sys
 
-from common import ROOT, review_ceiling
+from common import ROOT, review_ceiling, utf8_output
 from count_words import words_in_text
 
 PARTS_MANIFEST = ROOT / "Work" / "parts_manifest.json"
@@ -104,10 +104,11 @@ def build_chapter(entry):
 def report(entry, chapter, nparts):
     words = words_in_text(chapter)
     budget = entry.get("budget")
+    # The ceiling split_parts.py stored; recomputed only for a manifest without one.
     ceiling = entry.get("ceiling")
-    if ceiling is None and budget and entry.get("words"):
-        ceiling = review_ceiling(budget, entry["words"])
-    flag = "  <-- ABOVE CEILING %d" % ceiling if ceiling and words > ceiling else ""
+    if ceiling is None and budget is not None and entry.get("words"):
+        ceiling = review_ceiling(budget, entry.get("budget_words", entry["words"]))
+    flag = "  <-- ABOVE CEILING %d" % ceiling if ceiling is not None and words > ceiling else ""
     print("%s/%s: %d parts, %d words (budget %s)%s" % (
         entry["source_slug"], entry["unit_id"], nparts, words, budget, flag))
 
@@ -123,6 +124,7 @@ def record_merge(key, digest):
 
 
 def main():
+    utf8_output()
     args = sys.argv[1:]
     dry_run = "--dry-run" in args
     force = "--force" in args

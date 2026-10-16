@@ -1,9 +1,12 @@
 # Python 3.13 was used to build and test the pipeline scripts.
 # PDF rendering also requires Microsoft Edge on PATH or at a standard
-# install location (Work/build_pdf.py invokes headless --print-to-pdf).
+# install location (Work/build_pdf.py invokes headless --print-to-pdf, or
+# its DevTools protocol as a fallback).
 pymupdf==1.28.2
 pyspellchecker==0.9.0
 markdown==3.10.3
 jinja2==3.1.6
 # Optional: only Work/build_epub.py needs it.
 ebooklib==0.20
+# Optional: only the DevTools fallback in Work/build_pdf.py needs it.
+aiohttp==3.14.1

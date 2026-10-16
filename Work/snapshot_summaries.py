@@ -17,12 +17,13 @@ import re
 import shutil
 import sys
 
-from common import ROOT
+from common import ROOT, utf8_output
 
 SUMS = ROOT / "Work" / "Summaries"
 
 
 def main():
+    utf8_output()
     args = sys.argv[1:]
     if not args or not re.fullmatch(r"[a-z0-9-]+", args[0]):
         raise SystemExit(__doc__)

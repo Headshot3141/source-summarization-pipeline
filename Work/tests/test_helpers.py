@@ -1,6 +1,7 @@
 """Tests for the coordinator helpers: status updates, merging, queues,
-snapshots, the style-pass checker, and the author-reference checker. Run
-from the project root:
+snapshots, the style-pass checker, the author-reference checker, and the
+sentence-end test shared by extraction and splitting. Run from the project
+root:
 
     python -m unittest discover -s Work/tests
 """
@@ -21,6 +22,7 @@ import make_transition_queue  # noqa: E402
 import merge_chapters  # noqa: E402
 import set_status  # noqa: E402
 import snapshot_summaries  # noqa: E402
+from common import ends_sentence, paragraph_break_problems  # noqa: E402
 
 
 def run(fn, argv=None):
@@ -59,7 +61,8 @@ class Project(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = root = Path(self.tmp.name)
+        # Resolved, because common.rel() resolves the paths it is given.
+        self.root = root = Path(self.tmp.name).resolve()
         self.saved = []
         for mod, attrs in self.MODULES.items():
             for name, rel in attrs.items():
@@ -242,6 +245,51 @@ class StylePassCheck(unittest.TestCase):
         problems = " | ".join(check_style_pass.check(self.OLD, new))
         for label in ("QUOTE CHANGED", "HEADINGS CHANGED", "PARAGRAPH COUNT"):
             self.assertIn(label, problems)
+
+
+class SentenceEnds(unittest.TestCase):
+    """Docling prints a note reference after a space: "world. 7"."""
+
+    def test_note_number_after_a_space_ends_a_sentence(self):
+        self.assertTrue(ends_sentence("with the natural world. 7"))
+        self.assertTrue(ends_sentence("directed by the harbour board.13"))
+        self.assertTrue(ends_sentence("the quay was “closed.” 12"))
+
+    def test_reference_abbreviation_before_a_number_stays_open(self):
+        for text in ("see p. 12", "as printed in Vol. 3", "the rules in art. 7", "cf. 4"):
+            self.assertFalse(ends_sentence(text), text)
+
+    def test_number_without_punctuation_stays_open(self):
+        self.assertFalse(ends_sentence("with the natural world 7"))
+        self.assertFalse(ends_sentence("in the year 1917"))
+        self.assertFalse(ends_sentence("in the year. 1917"))  # four digits is no note number
+
+    def test_extraction_does_not_join_a_noted_paragraph_end_across_a_page(self):
+        import extract
+        self.assertFalse(extract.continues_across("with the natural world. 7", "The next paragraph begins here."))
+        self.assertTrue(extract.continues_across("as the harbour master wrote on p. 12",
+                                                 "Then the argument continues."))
+
+
+class ParagraphBreaks(unittest.TestCase):
+    """common.paragraph_break_problems: lines Markdown would run together."""
+
+    def test_lost_blank_lines_are_found(self):
+        text = "## One\n\nFirst.\nSecond.\n\n### Sub\nText.\n"
+        problems = paragraph_break_problems(text)
+        self.assertEqual([n for n, _ in problems], [4, 7])
+        self.assertIn("one paragraph", problems[0][1])
+        self.assertIn("heading", problems[1][1])
+
+    def test_quotation_running_into_text_is_found(self):
+        problems = paragraph_break_problems("> Quoted words.\nThe author's comment.\n")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("quotation", problems[0][1])
+
+    def test_lists_quotations_and_tables_may_be_adjacent(self):
+        text = ("- a\n- b\n\n1. one\n2. two\n\n> line one\n> line two\n\n"
+                "| Year | Output |\n|---|---|\n| 1930 | 12 |\n\nPlain text.\n")
+        self.assertEqual(paragraph_break_problems(text), [])
 
 
 class AuthorRefs(unittest.TestCase):

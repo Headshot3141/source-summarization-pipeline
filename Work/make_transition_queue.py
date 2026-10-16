@@ -12,13 +12,14 @@ are listed, so rerunning after acceptance shrinks the queue.
 import json
 import sys
 
-from common import ROOT
+from common import ROOT, utf8_output
 
 MANIFEST = ROOT / "Work" / "parts_manifest.json"
 QUEUE = ROOT / "Work" / "transition_queue.txt"
 
 
 def main():
+    utf8_output()
     if not MANIFEST.exists():
         sys.exit("Work/parts_manifest.json not found; run Work/split_parts.py first")
     entries = json.loads(MANIFEST.read_text(encoding="utf-8"))

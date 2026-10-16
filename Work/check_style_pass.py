@@ -19,13 +19,20 @@ change wording but never meaning, so this checks only what it must not change:
   headings ## / ### heading text identical
   blocks   block-quotation lines ("> ") identical
   paras    paragraph count unchanged
+  breaks   no two adjacent lines of the edited file that Markdown would run
+           together (common.paragraph_break_problems): a lost blank line
+           merges two paragraphs or pulls a heading into the text, and a
+           word diff cannot see it. Every such line of the edited file is
+           reported, as PARAGRAPH BREAK line N: <what>, since assembly
+           refuses them too.
   markers  protected markers, counted by class (whole words, ignoring case;
            within a class, overlapping matches count once, longest first):
              hedges        perhaps, probably, possibly, seemingly, apparently,
-                           tended to, often, usually, sometimes, not
-                           necessarily, may/might/would/could have, it is
-                           reckoned, it is estimated, purportedly,
-                           reportedly, allegedly, arguably
+                           tended to, seem to and appear to (any tense:
+                           "seems to", "appeared to"), often, usually,
+                           sometimes, not necessarily, may/might/would/could
+                           have, it is reckoned, it is estimated,
+                           purportedly, reportedly, allegedly, arguably
              contrast      but, yet, however, although, though, whereas,
                            nevertheless, even so, on the other hand, in
                            truth, while
@@ -33,10 +40,13 @@ change wording but never meaning, so this checks only what it must not change:
                            contend, maintain, write, think, suggest, hold,
                            note, observe, state, conclude, warn, remark, add,
                            acknowledge, admit, concede, assert, explain,
-                           point out, recall (state, note, hold, remark,
-                           recall and warn not after "the", "a", "his", ...,
-                           where they are nouns); according to; in
-                           his/her/their view; in X's view
+                           point out, recall, suspect, doubt, guess (state,
+                           note, hold, remark, recall, warn, suspect, doubt
+                           and guess not after "the", "a", "his", ...,
+                           where they are nouns, nor in "beyond doubt", "is
+                           suspect", "an educated guess" and the like,
+                           EXTRA_GUARDS); according to; in his/her/their
+                           view; in X's view
              negation      not (also cannot and n't), no, never, none, nor,
                            without, nobody, no one, nothing
              scope         some, most, only, merely, solely, just, all, few
@@ -111,7 +121,21 @@ a count ("(2 times)"):
                       words, or now introduces the author's lost view
                       ("Penhale argues A. Thompson thinks B." -> "Thompson
                       argues A; B."): that is an ATTRIBUTION DROP. Advisory
-                      lines are printed but do not flag the file.
+                      lines are printed but do not flag the file. Only a
+                      neutral reporting verb (argues, writes, notes, says,
+                      points out, ...) or phrase ("in Penhale's view") is
+                      advisory; a hedging verb is an AUTHOR HEDGE.
+  AUTHOR HEDGE        as ADVISORY, but the lost marker is a verb that hedges
+                      (think, believe, suspect, doubt, guess): "Penhale
+                      thinks the mill failed" may render the source's own
+                      "we think", and "The mill failed" then states flatly
+                      what the source offered as an opinion. Fails, unless
+                      the paragraph (the file, when the paragraph count
+                      changed) gained a hedges-class marker for each such
+                      loss ("The mill probably failed"), which keeps
+                      it ADVISORY. "suppose" (frames) and "seem to"/"appear
+                      to" (hedges) fail through their own classes, whatever
+                      their subject.
   ATTRIBUTION CHECK   a pronoun subject (he, she, they, it, one, we, you, and
                       his/her/their/him/them/its/us/our) that cannot be read
                       as a speaker: the coordinator confirms who; a defect if
@@ -145,6 +169,7 @@ Lines read
     SPEAKER ORDER "<markers>" <old> -> <new>[ in paragraph N]: "<old subject>", ... -> "<new subject>", ...: the same speakers report in a different order; ...
     VIEW MOVED "<markers>" <old> -> <new>[ in paragraph N]: "<speaker>" now reports "<word>", ... (from "<other speaker>")[; ...]: defect unless the source gives each view to its new speaker
     ADVISORY "<markers>" <old> -> <new>[ in paragraph N] by "<subject>"[ (N times)][ (now "<new subject>", ...)]: ...
+    AUTHOR HEDGE "<markers>" <old> -> <new>[ in paragraph N] by "<subject>"[ (N times)]: ...
     ATTRIBUTION CHECK "<markers>" <old> -> <new>[ in paragraph N] by pronoun '<subject>'[ (now ...)]: confirm who; defect if it was another speaker
     ATTRIBUTION DROP "<markers>" <old> -> <new>[ in paragraph N] by "<subject>"[ (now ...)]: ...
 where a pronoun read as a speaker is given as by pronoun '<subject>' (read
@@ -174,7 +199,7 @@ from pathlib import Path
 import check_author_refs
 from check_fidelity import (FRACTION_FORMS, ORDINALS, OTHER_NUMBER_WORDS, PLURAL_SCALES, SCALES, UNITS,
                             WEAK_ORDINALS, quote_spans)
-from common import ROOT
+from common import ROOT, paragraph_break_problems, utf8_output
 
 DEFAULT_ARCHIVE = ROOT / "Work" / "Summaries_prestyle"
 CURRENT = ROOT / "Work" / "Summaries"
@@ -225,19 +250,39 @@ REPORTING_VERBS.update({
     "hold": ["hold", "holds", "held", "holding"],
     "admit": _forms("admit", doubled=True),
     "point out": ["point out", "points out", "pointed out", "pointing out"],
+    "suspect": _forms("suspect"),
+    "doubt": _forms("doubt"),
+    "guess": ["guess", "guesses", "guessed", "guessing"],
 })
 # Reporting verbs that are also common nouns ("the state", "a note", "his
-# notes", "a warning"): a form after one of these words is not counted.
-NOUN_LIKE_VERBS = {"state", "note", "hold", "remark", "recall", "warn"}
+# notes", "a warning", "no doubt", "a suspect"): a form after one of these
+# words is not counted.
+NOUN_LIKE_VERBS = {"state", "note", "hold", "remark", "recall", "warn", "suspect", "doubt", "guess"}
+# Reporting verbs that hedge. With the author as subject they often render
+# the source's own hedge ("we think", "I suspect"), so removing one is an
+# AUTHOR HEDGE, not an ADVISORY author preface.
+AUTHOR_HEDGES = {"think", "believe", "suspect", "doubt", "guess"}
+# Hedges that are a verb and "to", in any tense ("seems to", "appeared to").
+VERB_HEDGES = {"seem to": "seem", "appear to": "appear"}
 NOUN_GUARD = "".join(r"(?<!\b%s\s)" % w for w in (
     "the", "a", "an", "this", "that", "these", "those", "his", "her", "their", "its", "our", "my",
     "your", "each", "every", "no", "any", "one", "whole", "same", "new", "own", "such", "another",
     "united", "member", "nation", "welfare", "written", "final", "early", "first", "last"))
+# More words before the nouns (and the adjective "suspect") that the hedging
+# verbs also are: "beyond doubt", "casts doubt", "the prime suspect", "the
+# figures are suspect", "an educated guess".
+EXTRA_GUARDS = {
+    "doubt": ("beyond", "without", "in", "of", "cast", "casts", "casting", "raise", "raises", "raised",
+              "raising", "serious", "grave", "real", "reasonable", "some", "little", "much"),
+    "suspect": ("prime", "chief", "main", "usual", "is", "are", "was", "were", "be", "been", "seem",
+                "seems", "seemed", "remain", "remains", "remained", "look", "looks", "looked"),
+    "guess": ("educated", "best", "wild", "rough", "good", "fair"),
+}
 MARKER_CLASSES = {
     "hedges": [
         "perhaps", "probably", "possibly", "seemingly", "apparently", "tended to",
-        "often", "usually", "sometimes", "not necessarily", "may have", "might have",
-        "would have", "could have", "it is reckoned", "it is estimated",
+        "seem to", "appear to", "often", "usually", "sometimes", "not necessarily",
+        "may have", "might have", "would have", "could have", "it is reckoned", "it is estimated",
         "purportedly", "reportedly", "allegedly", "arguably",
     ],
     "contrast": [
@@ -269,10 +314,13 @@ def _marker_pattern(marker):
         return re.compile(r"\b(?:can)?not\b|n['’]t\b", re.I)
     if marker in REPORTING_VERBS:
         guard = NOUN_GUARD if marker in NOUN_LIKE_VERBS else ""
+        guard += "".join(r"(?<!\b%s\s)" % w for w in EXTRA_GUARDS.get(marker, ()))
         forms = sorted(REPORTING_VERBS[marker], key=len, reverse=True)
         return re.compile(guard + r"\b(?:%s)\b" % "|".join(f.replace(" ", r"\s+") for f in forms), re.I)
     if marker == POSSESSIVE_VIEW:
         return re.compile(r"\bin\s+((?:the\s+)?(?:[\w.-]+\s+){0,2}?[\w.-]+?)['’]s?\s+view\b", re.I)
+    if marker in VERB_HEDGES:
+        return re.compile(r"\b%s(?:s|ed|ing)?\s+to\b" % VERB_HEDGES[marker], re.I)
     return re.compile(r"\b" + re.escape(marker).replace(r"\ ", r"\s+") + r"\b", re.I)
 
 
@@ -288,6 +336,9 @@ ADVISORY = {
     "all": "'at all' is emphasis rather than scope",
 }
 AUTHOR_NOTE = "author preface removed; correct if it only introduced the author's own view"
+HEDGE_NOTE = ("author's hedge removed; the verb may render the source's own hedge (\"we think\"): "
+              "restore a hedge (perhaps, probably) unless the source states the view flatly")
+HEDGE_KEPT_NOTE = "author's hedging verb removed and a hedge added; confirm the hedge matches the source's"
 OTHER_NOTE = "another speaker's marker removed; defect unless the view is still marked"
 PRONOUN_NOTE = "confirm who; defect if it was another speaker"
 SWAP_NOTE = "speaker changed; defect unless the source gives the view to the new speaker"
@@ -914,9 +965,11 @@ def compare_markers(old, new, where, speakers):
                          for i, b, words in al.moves if {i, b} == pair]
                 problems.append("VIEW MOVED %s: %s: %s" % (counts(pair), "; ".join(parts), VIEW_NOTE))
         if al.lost:
+            hedged = [i for i in al.lost if olds[i].marker in AUTHOR_HEDGES and olds[i].marker in lost]
+            added = len(class_matches("hedges", new)) - len(class_matches("hedges", old))
             problems += attribution_problems(
                 [(i, olds[i].subject) for i in al.lost], [news[j].subject for j in sorted(al.gained)], fell,
-                counts(al.lost), speakers, al)
+                counts(al.lost), speakers, al, hedged, added)
             continue
         if fell:
             notes = "".join("  (check sense: %s)" % ADVISORY[mk] for mk in names if mk in ADVISORY)
@@ -924,10 +977,13 @@ def compare_markers(old, new, where, speakers):
     return problems
 
 
-def attribution_problems(lost, gained, fell, counts, sp, al=None):
+def attribution_problems(lost, gained, fell, counts, sp, al=None, hedged=(), added_hedges=0):
     """One line per lost reporting subject ((old index, subject) pairs), the
     same line given once with a count. When the reporting count did not
-    fall, a lost subject means the view now goes to someone else."""
+    fall, a lost subject means the view now goes to someone else. hedged:
+    the old indices whose marker is a hedging verb (AUTHOR_HEDGES) whose
+    count fell; added_hedges: how many hedges-class markers the text gained,
+    each of which makes up for one lost hedging verb."""
     al = al or Alignment()
     now = ' (now %s)' % ", ".join('"%s"' % g for g in gained) if gained else ""
     # The voice's view moved to another speaker is a defect, not a removed preface.
@@ -941,6 +997,12 @@ def attribution_problems(lost, gained, fell, counts, sp, al=None):
         moved = [al.taken[i]] if i in al.taken else list(dict.fromkeys(al.moved_other))
         if kind == "author" and moved:
             lines.append(("ATTRIBUTION DROP", by, MOVED_NOTE % ", ".join('"%s"' % m for m in moved)))
+        elif kind == "author" and fell and i in hedged:
+            if added_hedges > 0:
+                added_hedges -= 1
+                lines.append(("ADVISORY", by, HEDGE_KEPT_NOTE))
+            else:
+                lines.append(("AUTHOR HEDGE", by, HEDGE_NOTE))
         elif kind == "author" and (fell or not gained_other):
             lines.append(("ADVISORY", by, AUTHOR_NOTE if fell else VOICE_SWAP_NOTE))
         elif kind == "pronoun":
@@ -1002,6 +1064,9 @@ def check(old, new, author_forms=(), not_author=(), name_groups=()):
     if oh != nh:
         problems.append("HEADINGS CHANGED: %s -> %s" % (oh, nh))
 
+    for n, message in paragraph_break_problems(new):
+        problems.append("PARAGRAPH BREAK line %d: %s" % (n, message))
+
     op, np_ = blocks(old), blocks(new)
     if len(op) != len(np_):
         problems.append("PARAGRAPH COUNT %d -> %d" % (len(op), len(np_)))
@@ -1056,10 +1121,7 @@ def name_groups_for(path):
 
 
 def main():
-    if hasattr(sys.stdout, "reconfigure"):
-        # A console or pipe may not encode every character (cp1252 on
-        # Windows): escape what it cannot rather than stop the report.
-        sys.stdout.reconfigure(errors="backslashreplace")
+    utf8_output()
     args = sys.argv[1:]
     archive = DEFAULT_ARCHIVE
     if "--archive" in args:

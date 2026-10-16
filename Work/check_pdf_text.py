@@ -1,13 +1,14 @@
-"""Check that Summary.pdf shows exactly the text of Summary.md.
+"""Check that the PDF (build_pdf.PDF, named from TITLE) shows exactly the text of Summary.md.
 
 Run from the project root (Work/build_pdf.py also runs it after every build):
 
-    python Work/check_pdf_text.py [--md Summary.md] [--pdf Summary.pdf]
+    python Work/check_pdf_text.py [--md Summary.md] [--pdf <OUTPUT_NAME>.pdf]
 
 Text check. The Markdown's words, read with the renderer's own structure
 rules (build_pdf.parse_lines: heading, quotation, and list markup removed;
-the number of a numbered list item kept, because the browser prints it),
-must equal the PDF's words, in order. The PDF text is extracted with
+the asterisks of an italic span removed, because the renderer prints it as
+italics; the number of a numbered list item kept, because the browser
+prints it), must equal the PDF's words, in order. The PDF text is extracted with
 PyMuPDF, without the page numbers the build adds. Line breaks in the PDF:
 - A word broken with a hyphen is joined without the hyphen only when the
   joined word occurs in the Markdown and the hyphenated form does not (a
@@ -26,7 +27,9 @@ not a rendering change, and is listed as a warning.
 Structural checks: blank pages, U+FFFD characters, every `#` and `##`
 heading present, and no leftover `Work/`, `.md`, `<!--`, or page-reference
 strings. Pages with very little text (other than the last) are listed as
-warnings for visual inspection.
+warnings for visual inspection, and so is any asterisk left in the PDF text:
+an unmatched italic span, or `**bold**` copied from a source, prints
+literally.
 
 Exits 1 on any difference or failed check.
 """
@@ -36,7 +39,8 @@ import sys
 
 import pymupdf
 
-from build_pdf import MD, PDF, parse_lines
+from build_pdf import MD, PDF, parse_lines, strip_emphasis
+from common import utf8_output
 
 SYNC = 6        # equal words needed to realign after a difference
 WINDOW = 400    # how far ahead (in words) to look for realignment
@@ -70,23 +74,26 @@ def tokens(text):
     return text.split()
 
 
-def markdown_words(md_text):
+def markdown_words(md_text, list_numbers=True):
     """(words, line numbers, headings) for Summary.md text.
 
     headings is a list of (line number, level marker, words) for `#` and `##`.
+    list_numbers keeps each numbered list item's number, which the browser
+    prints into the PDF text; Work/check_epub_text.py turns it off, because
+    an e-reader draws the numbers of an <ol> and they are not in the text.
     """
     words, where, headings = [], [], []
     for line in parse_lines(md_text):
         if line.kind in ("blank", "separator"):
             continue
-        text = clean(line.text)
-        if line.kind == "item" and line.number is not None:
+        text = clean(strip_emphasis(line.text))
+        if list_numbers and line.kind == "item" and line.number is not None:
             text = "%d. %s" % (line.number, text)
         toks = tokens(text)
         words.extend(toks)
         where.extend([line.lineno] * len(toks))
         if line.kind == "heading" and line.marker in ("#", "##"):
-            headings.append((line.lineno, line.marker, tokens(clean(line.text))))
+            headings.append((line.lineno, line.marker, tokens(clean(strip_emphasis(line.text)))))
     return words, where, headings
 
 
@@ -194,17 +201,22 @@ def _show(words, a, b):
     return " ".join(part)
 
 
-def describe(diff, md_words, md_lines, pdf_wds, pdf_pages):
+def describe(diff, md_words, md_lines, found_words, found_where, found="PDF", unit="page"):
+    """A compare() difference with its context, its Summary.md line, and its place in the output.
+
+    found_where gives each found word's place: its PDF page, or for
+    Work/check_epub_text.py (found="EPUB", unit="file") its spine file.
+    """
     i0, i1, j0, j1 = diff
     line = md_lines[min(i0, len(md_lines) - 1)] if md_lines else 0
-    page = pdf_pages[min(j0, len(pdf_pages) - 1)] if pdf_pages else 0
+    place = found_where[min(j0, len(found_where) - 1)] if found_where else "?"
     before = _show(md_words, max(0, i0 - CONTEXT), i0)
     after = _show(md_words, i1, i1 + CONTEXT)
-    return ("Summary.md line %d, PDF page %d:\n"
+    return ("Summary.md line %d, %s %s %s:\n"
             "    context:  %s [...] %s\n"
             "    Markdown: [%s]\n"
-            "    PDF:      [%s]" % (line, page, before, after,
-                                    _show(md_words, i0, i1), _show(pdf_wds, j0, j1)))
+            "    %-10s[%s]" % (line, found, unit, place, before, after,
+                               _show(md_words, i0, i1), found + ":", _show(found_words, j0, j1)))
 
 
 def check(md_path=MD, pdf_path=PDF):
@@ -238,6 +250,11 @@ def check(md_path=MD, pdf_path=PDF):
     for pattern, label in LEFTOVERS:
         for m in pattern.finditer(flat):
             problems.append("leftover %s in the PDF: %r" % (label, flat[max(0, m.start() - 30):m.end() + 30]))
+    stars = [m.start() for m in re.finditer(r"\*+", flat)]  # one context per run of asterisks
+    if stars:
+        shown = ", ".join(repr(flat[max(0, i - 30):i + 30]) for i in stars[:5])
+        warnings.append("%d literal asterisk(s) in the PDF text (an unmatched italic span, or "
+                        "Markdown bold?): %s" % (flat.count("*"), shown))
 
     diffs = 0
     for d in compare(md_wds, pdf_wds):
@@ -265,10 +282,9 @@ def check(md_path=MD, pdf_path=PDF):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--md", default=MD, help="Markdown file (default: Summary.md)")
-    parser.add_argument("--pdf", default=PDF, help="PDF file (default: Summary.pdf)")
+    parser.add_argument("--pdf", default=PDF, help="PDF file (default: %(default)s)")
     args = parser.parse_args(argv)
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(errors="backslashreplace")  # report any character on any console
+    utf8_output()
     if not check(args.md, args.pdf):
         sys.exit(1)
 

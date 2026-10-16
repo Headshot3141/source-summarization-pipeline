@@ -31,7 +31,7 @@ import re
 import sys
 from pathlib import Path
 
-from common import ROOT
+from common import ROOT, utf8_output
 
 CONFIG = ROOT / "Work" / "author_refs.json"
 # Fill in Work/author_refs.json during Preflight, for example:
@@ -116,7 +116,10 @@ def flagged_paragraphs(text, patterns, exclude=()):
     """[(line, references)] for paragraphs that refer to one person more than once."""
     found = []
     for line, para in paragraphs(text):
-        para = QUOTED.sub("", para)
+        # A quotation hard-wrapped across lines is still one quotation: with
+        # the newline left in, its straight quotes pair with the wrong ones
+        # and hide the text between two quotations instead.
+        para = QUOTED.sub("", para.replace("\n", " "))
         for phrase in exclude:
             para = para.replace(phrase, "")
         over = [r for p in patterns for r in [p.findall(para)] if len(r) > 1]
@@ -147,6 +150,7 @@ def manifest_paths():
 
 
 def main(argv):
+    utf8_output()
     refs, not_author = load_config()
     paths = [Path(a) for a in argv] or manifest_paths()
     total = missing = 0

@@ -1,17 +1,27 @@
-"""Regression tests for Work/extract.py. Run from the project root:
+"""Regression tests for Work/extract.py and the extraction helpers (source_helpers.py,
+check_chapters.py, md_toc.py, count_words.words_of). Run from the project root:
 
     python -m unittest discover -s Work/tests
 """
+import importlib.util
+import io
+import json
 import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
 
 import pymupdf
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import check_chapters  # noqa: E402
 import extract  # noqa: E402
-from common import ends_sentence, is_heading, strip_comments  # noqa: E402
+import md_toc  # noqa: E402
+import source_helpers  # noqa: E402
+from common import ends_sentence, is_heading, parse_frontmatter, strip_comments  # noqa: E402
+from count_words import words_of  # noqa: E402
 from extract import DocEvidence, RepairLog, join_lines, join_pages, strip_chapter_heading  # noqa: E402
 
 
@@ -369,6 +379,47 @@ class Epub(unittest.TestCase):
         log = RepairLog()
         extract.epub_paragraphs("<body><p>Body.</p></body>", {"unit_id": "ch-01", "title": "T"}, log)
         self.assertEqual(log.kinds(), ["heading-not-found"])
+
+    def test_skip_class_is_dropped_but_is_not_the_heading(self):
+        log = RepairLog()
+        xhtml = '<body><p>Body.</p><p class="nav">Next chapter</p></body>'
+        paras = extract.epub_paragraphs(xhtml, {"unit_id": "ch-01", "title": "T"}, log,
+                                        heading_classes=["h"], skip_classes=["nav"])
+        self.assertEqual(paras, ["Body."])
+        self.assertEqual(log.kinds(), ["heading-not-found"])
+
+    def test_multi_file_chapter_keeps_later_headings(self):
+        import zipfile
+        files = {
+            "OPS/a.htm": '<body><h2 class="t">Title</h2><p>One.</p></body>',
+            "OPS/b.htm": '<body><h2 class="t">Section Two</h2><p>Two.</p><p class="nav">Index</p></body>',
+        }
+        with tempfile.TemporaryDirectory() as d:
+            with zipfile.ZipFile(os.path.join(d, "x.epub"), "w") as z:
+                for name, text in files.items():
+                    z.writestr(name, text)
+            old = extract.SOURCES
+            extract.SOURCES = d
+            try:
+                cfg = {"epub": "x.epub", "epub_page_anchor": "", "epub_heading_classes": ["t"],
+                       "epub_skip_classes": ["nav"]}
+                log = RepairLog()
+                ch = {"unit_id": "ch-01", "title": "Title", "files": ["OPS/a.htm", "OPS/b.htm"]}
+                paras = extract.make_epub_extractor(cfg, log)(ch)
+            finally:
+                extract.SOURCES = old
+        self.assertEqual(paras, ["One.", "Section Two", "Two."])
+        self.assertEqual(log.kinds(), [])
+
+    def test_file_and_files_are_exclusive(self):
+        base = {"slug": "x", "epub": "x.epub", "part": 1}
+        ch = {"unit_id": "ch-01", "slug": "c", "title": "T"}
+        both = dict(base, chapters=[dict(ch, file="a.htm", files=["a.htm"])])
+        none = dict(base, chapters=[dict(ch)])
+        multi = dict(base, chapters=[dict(ch, files=["a.htm", "b.htm"])])
+        self.assertTrue(any("both file and files" in e for e in extract.validate_config(both)))
+        self.assertTrue(any("no EPUB file" in e for e in extract.validate_config(none)))
+        self.assertEqual(extract.validate_config(multi), [])
 
 
 class LonePunctuation(unittest.TestCase):
@@ -970,3 +1021,703 @@ class DoclingMarkdown(unittest.TestCase):
         paras, log = self.one("The long- versus short-term view.\n", hyphen_spaces=True)
         self.assertEqual(paras, ["The long- versus short-term view."])
         self.assertIn("hyphen-kept", log.kinds())
+
+
+class TempProject:
+    """Mixin: point extract.py and source_helpers.py at temporary Sources, Chapters, Raw, and Proof folders."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = tmp.name
+        for name in ("Sources", "Chapters", "Raw", "Proof"):
+            os.makedirs(os.path.join(self.tmp, name))
+        saved = (extract.SOURCES, extract.OUT, extract.RAW, extract.ROOT, source_helpers.SOURCES, source_helpers.PROOF)
+
+        def restore():
+            (extract.SOURCES, extract.OUT, extract.RAW, extract.ROOT,
+             source_helpers.SOURCES, source_helpers.PROOF) = saved
+
+        self.addCleanup(restore)
+        extract.SOURCES = source_helpers.SOURCES = os.path.join(self.tmp, "Sources")
+        extract.OUT = os.path.join(self.tmp, "Chapters")
+        extract.RAW = os.path.join(self.tmp, "Raw")
+        extract.ROOT = self.tmp
+        source_helpers.PROOF = os.path.join(self.tmp, "Proof")
+
+    def write(self, rel, text):
+        path = os.path.join(self.tmp, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        return path
+
+
+def quiet(fn, *args, **kwargs):
+    """Call fn with stdout captured; return (result, output)."""
+    out = io.StringIO()
+    with redirect_stdout(out):
+        result = fn(*args, **kwargs)
+    return result, out.getvalue()
+
+
+# Line numbers of LINE_EDITS_MD, for the line-edit tests.
+LINE_EDITS_MD = "\n".join([
+    "## The Quay",                                   # 1
+    "",
+    'The boats came "home" at dawn - late.',         # 3
+    "",
+    "Tbe tide was low.",                             # 5
+    "",
+    "The harbour board wrote",                       # 7
+    "",
+    "that the quay was unsafe.",                     # 9
+    "",
+    "3 A note on the board.",                        # 11
+    "",
+    "Translator's note: the board met monthly.",     # 13
+    "",
+    "It ruled:",                                     # 15
+    "Close the quay.",                               # 16
+    "Open the slip.",                                # 17
+    "",
+    "Smith &amp; Sons rebuilt it.",                  # 19
+]) + "\n"
+
+
+class LineEdits(TempProject, unittest.TestCase):
+    """source_helpers.build_line_edits: line-numbered edits, each checked against its line."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("Sources/q.md", LINE_EDITS_MD)
+
+    def edits(self, **ops):
+        return source_helpers.build_line_edits("q.md", **ops)
+
+    def stops(self, message, **ops):
+        with self.assertRaises(SystemExit) as cm:
+            self.edits(**ops)
+        self.assertIn(message, str(cm.exception))
+
+    def test_md_lines_and_skeleton(self):
+        lines = source_helpers.md_lines("q.md")
+        self.assertEqual(lines[2], 'The boats came "home" at dawn - late.')
+        self.assertEqual(source_helpers.skeleton("Dawn—late, “home”: 1937!"), "dawnlatehome1937")
+
+    def test_rebuilt_line_keeps_its_letters_and_digits(self):
+        rebuilt = "The boats came “home” at dawn—late."
+        self.assertEqual(self.edits(rebuilt={3: rebuilt}), {3: rebuilt})
+        self.assertEqual(self.edits(rebuilt={19: "Smith & Sons rebuilt it."}), {19: "Smith & Sons rebuilt it."})
+        self.stops("q.md: line 3: rebuilt text changes letters or digits", rebuilt={3: "The boats came home at noon."})
+
+    def test_replace_and_edits(self):
+        self.assertEqual(self.edits(replace={5: ("Tbe", "The tide was low.")}), {5: "The tide was low."})
+        self.assertEqual(self.edits(replace={5: "The tide was low."}), {5: "The tide was low."})
+        self.stops("line 5: does not start with 'The'", replace={5: ("The", "x")})
+        self.stops("line 4: is blank", replace={4: "x"})
+        self.assertEqual(self.edits(edits={5: [("Tbe", "The"), ("low", "out")]}), {5: "The tide was out."})
+        self.assertEqual(self.edits(edits={3: [("e", "E", 4)]}), {3: 'ThE boats camE "homE" at dawn - latE.'})
+        self.stops("line 5: 'e' occurs 2 times, expected 1", edits={5: [("e", "E")]})
+
+    def test_swaps_joins_moves_drops(self):
+        self.assertEqual(self.edits(swaps=[(3, 5)]), {3: "Tbe tide was low.", 5: LINE_EDITS_MD.split("\n")[2]})
+        self.assertEqual(self.edits(joins=[(7, 9)]), {7: "The harbour board wrote that the quay was unsafe.", 9: ""})
+        self.stops("line 8: is blank", joins=[(7, 8)])
+        self.assertEqual(self.edits(moves=[(11, 15)]), {15: "It ruled:\n\n3 A note on the board.", 11: ""})
+        self.assertEqual(self.edits(drops={13: "Translator's note"}), {13: ""})
+        self.stops("line 13: dropped line does not contain 'Editor'", drops={13: "Editor"})
+        self.stops("line 99 is not a line of the file (1-19)", drops={99: "x"})
+
+    def test_quotes_set_off_items_written_without_blank_lines(self):
+        self.assertEqual(self.edits(quotes=[16, 17]), {16: "\n> Close the quay.", 17: "\n> Open the slip."})
+        self.assertEqual(self.edits(quotes=[5]), {5: "> Tbe tide was low."})
+        self.stops("line 4: quoted line is blank", quotes=[4])
+
+    def test_operations_apply_in_order(self):
+        out = self.edits(edits={5: [("Tbe", "The")]}, joins=[(3, 5)], quotes=[3])
+        self.assertEqual(out[3], '> The boats came "home" at dawn - late. The tide was low.')
+
+    def test_markdown_source_applies_line_edits_by_number(self):
+        cfg = {"md": "q.md", "slug": "q", "title": "Q", "part": 1,
+               "line_edits": lambda: self.edits(edits={5: [("Tbe", "The")]}, joins=[(7, 9)],
+                                                 drops={13: "Translator's note"}, quotes=[16, 17]),
+               "chapters": [{"unit_id": "ch-01", "slug": "the-quay", "title": "The Quay"}]}
+        cfg = extract.resolve_config(cfg)
+        self.assertEqual(extract.validate_config(cfg), [])
+        log = RepairLog()
+        paras = quiet(extract.make_md_extractor, cfg, log)[0](cfg["chapters"][0])
+        self.assertEqual(paras, ['The boats came "home" at dawn - late.', "The tide was low.",
+                                 "The harbour board wrote that the quay was unsafe.", "3 A note on the board.",
+                                 "It ruled:", "> Close the quay.", "> Open the slip.", "Smith & Sons rebuilt it."])
+        self.assertEqual(log.kinds().count("line-edited"), 6)
+        self.assertIn(("", "line 13", "line-edited", "Translator's note: the board met monthly. -> (dropped)"), log.rows)
+
+    def test_split_and_past_the_end(self):
+        log = RepairLog()
+        cfg = {"md": "q.md", "slug": "q", "line_edits": {5: "The tide.\n\nIt was low.", 3: ""},
+               "chapters": [{"unit_id": "ch-01", "slug": "a", "title": "The Quay"}]}
+        paras = quiet(extract.make_md_extractor, cfg, log)[0](cfg["chapters"][0])
+        self.assertEqual(paras[:2], ["The tide.", "It was low."])
+        with self.assertRaises(SystemExit) as cm:
+            extract.MdSource(dict(cfg, line_edits={20: "x", 25: "y"}))
+        self.assertIn("q.md: line_edits for lines past the end of the file (19 lines): 20, 25", str(cm.exception))
+
+    def test_unused_line_fixes_are_logged_and_printed(self):
+        log = RepairLog()
+        cfg = {"md": "q.md", "slug": "q", "line_fixes": {"Tbe tide was low.": "The tide was low.", "Nowhere.": "x"},
+               "chapters": [{"unit_id": "ch-01", "slug": "a", "title": "The Quay"}]}
+        _, out = quiet(extract.MdSource, cfg, log)
+        self.assertEqual([r for r in log.rows if r[2] == "line-fix-unused"],
+                         [("", None, "line-fix-unused", "line_fixes key matches no line: 'Nowhere.'")])
+        self.assertIn("WARNING q: line_fixes key matches no line: 'Nowhere.'", out)
+
+    def test_unused_line_fixes_in_paged_text(self):
+        self.write("Sources/t.txt", "Chapter One\n\nThe boats came home.\n\fNot extracted.\n")
+        cfg = {"txt": "t.txt", "slug": "t", "line_fixes": {"The boats came home.": "The boats came in.",
+                                                           "Not extracted.": "x"}}
+        log = RepairLog()
+        ex = quiet(extract.make_txt_extractor, cfg, log)[0]
+        self.assertEqual(ex({"unit_id": "ch-01", "start": 1, "end": 1, "first_line": "The boats"}),
+                         ["<!-- page 1 -->\nThe boats came in."])
+        self.assertEqual(quiet(extract.report_unused_line_fixes, cfg, ex.source.fixes_used, log)[0], ["Not extracted."])
+        self.assertIn("line-fix-unused", log.kinds())
+
+
+class ProofFixes(TempProject, unittest.TestCase):
+    """source_helpers.proof_fixes and write_preproof: a proofreading pass as line edits."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("Sources/q.md", LINE_EDITS_MD)
+
+    def proof(self, listed, fixes):
+        self.write("Proof/q.preproof.json", json.dumps([{"line": n, "text": t} for n, t in listed]))
+        self.write("Proof/q.fixes.json", json.dumps(fixes))
+
+    def test_fixes_are_keyed_by_line_number(self):
+        self.proof([(5, "Tbe tide was low."), (7, "The harbour board wrote")], {"5": "The tide was low."})
+        fixes = source_helpers.proof_fixes("q", "q.md")
+        self.assertEqual(fixes, {5: "The tide was low."})
+        self.assertEqual(source_helpers.build_line_edits("q.md", replace=fixes, quotes=[5]), {5: "> The tide was low."})
+
+    def test_changed_source_or_unlisted_line_stops(self):
+        self.proof([(5, "Tbe tide was high.")], {"5": "The tide was high."})
+        with self.assertRaises(SystemExit) as cm:
+            source_helpers.proof_fixes("q", "q.md")
+        self.assertIn("line 5 of q.md no longer reads as it did when it was proofread (source changed)",
+                      str(cm.exception))
+        self.proof([(5, "Tbe tide was low.")], {"7": "x"})
+        with self.assertRaises(SystemExit) as cm:
+            source_helpers.proof_fixes("q", "q.md")
+        self.assertIn("fixes for lines not in the pre-proof listing: 7", str(cm.exception))
+
+    def test_missing_files_give_no_fixes(self):
+        self.assertEqual(source_helpers.proof_fixes("q", "q.md"), {})
+
+    def test_one_fixes_file_per_unit_is_merged(self):
+        self.proof([(5, "Tbe tide was low."), (7, "The harbour board wrote")], {"5": "The tide was low."})
+        self.write("Proof/q.ch-02.fixes.json", json.dumps({"7": "The harbour board wrote:"}))
+        self.write("Proof/q-other.ch-01.fixes.json", json.dumps({"9": "not this source"}))
+        self.assertEqual(source_helpers.proof_fixes("q", "q.md"), {5: "The tide was low.", 7: "The harbour board wrote:"})
+        self.write("Proof/q.ch-03.fixes.json", json.dumps({"5": "The tide was out."}))
+        with self.assertRaises(SystemExit) as cm:
+            source_helpers.proof_fixes("q", "q.md")
+        self.assertIn("line 5 is fixed differently in", str(cm.exception))
+        self.assertIn("q.ch-03.fixes.json", str(cm.exception))
+
+    def test_write_preproof_adds_lines_and_keeps_entries(self):
+        self.assertEqual(source_helpers.write_preproof("q", "q.md", 1, 5), 3)
+        self.assertEqual(source_helpers.write_preproof("q", "q.md", 3, 9), 2)
+        with open(os.path.join(self.tmp, "Proof", "q.preproof.json"), encoding="utf-8") as f:
+            listed = json.load(f)
+        self.assertEqual([e["line"] for e in listed], [1, 3, 5, 7, 9])
+        self.assertEqual(listed[2], {"line": 5, "text": "Tbe tide was low."})
+
+
+class SourceConfigFiles(TempProject, unittest.TestCase):
+    """Work/SourceConfigs: one config file per source, loaded and resolved by extract.py."""
+
+    def folder(self, files):
+        folder = os.path.join(self.tmp, "Configs")
+        os.makedirs(folder, exist_ok=True)
+        for name, text in files.items():
+            self.write(os.path.join("Configs", name), text)
+        return folder
+
+    @staticmethod
+    def config(slug, md="x.md"):
+        return ("from source_helpers import build_line_edits\n\n"
+                "CONFIG = {'slug': %r, 'md': %r, 'title': 'T', 'part': 1,\n"
+                "          'line_edits': lambda: build_line_edits(%r),\n"
+                "          'chapters': [{'unit_id': 'ch-01', 'slug': 'war', 'title': 'War'}]}\n" % (slug, md, md))
+
+    def test_template_entries_are_documentation_only(self):
+        self.assertEqual(extract.SOURCES_CONFIG, [])
+
+    def test_one_file_per_source_appended_in_file_name_order(self):
+        folder = self.folder({"b_src.py": self.config("b-src"), "a_src.py": self.config("a-src"),
+                              "_notes.py": "x = 1\n", "README.md": "# Source configs\n"})
+        self.assertEqual([c["slug"] for c in extract.all_sources(folder)], ["a-src", "b-src"])
+        self.assertEqual(extract.all_sources(os.path.join(self.tmp, "absent")), [])
+
+    def test_duplicate_slug_is_rejected(self):
+        folder = self.folder({"a_src.py": self.config("same"), "b_src.py": self.config("same")})
+        with self.assertRaises(SystemExit) as cm:
+            extract.all_sources(folder)
+        self.assertIn("b_src.py: slug 'same' is already used by", str(cm.exception))
+        self.assertIn("a_src.py", str(cm.exception))
+
+    def test_bad_file_is_rejected_naming_the_line(self):
+        cases = {"CONFIG = {'slug': 'a',\n": "failed to import (line 1): SyntaxError",
+                 "x = 1\nCONFIG = {'slug': undefined_name}\n": "failed to import (line 2): NameError",
+                 "SETTINGS = {'slug': 'a'}\n": "defines no CONFIG dict",
+                 "CONFIG = {'md': 'x.md'}\n": "CONFIG has no slug"}
+        for text, message in cases.items():
+            folder = self.folder({"bad_src.py": text})
+            with self.assertRaises(SystemExit) as cm:
+                extract.all_sources(folder)
+            self.assertIn("bad_src.py: ", str(cm.exception))
+            self.assertIn(message, str(cm.exception))
+
+    def test_slug_filtering(self):
+        configs = [{"slug": "a-src"}, {"slug": "b-src"}, {"slug": "c-src"}]
+        self.assertEqual(extract.select_sources(configs, []), configs)
+        self.assertEqual(extract.select_sources(configs, ["c-src", "a-src"]), [configs[0], configs[2]])
+        with self.assertRaises(SystemExit) as cm:
+            extract.select_sources(configs, ["a-src", "d-src"])
+        self.assertIn("no source has slug 'd-src'; configured: a-src, b-src, c-src", str(cm.exception))
+        with self.assertRaises(SystemExit) as cm:
+            extract.select_sources([], ["a-src"])
+        self.assertIn("configured: none", str(cm.exception))
+
+    def test_callables_are_resolved_only_when_extracted(self):
+        # The config loads with no Sources/x.md; its line_edits read the file only when resolved.
+        cfg = extract.all_sources(self.folder({"a_src.py": self.config("a-src")}))[0]
+        self.assertTrue(callable(cfg["line_edits"]))
+        self.assertEqual(extract.validate_config(cfg), [])
+        with self.assertRaises(SystemExit) as cm:
+            extract.resolve_config(cfg)
+        self.assertIn("a-src: line_edits: ", str(cm.exception))
+        self.assertIn("x.md: not found", str(cm.exception))
+        resolved = extract.resolve_config(dict(cfg, line_edits=lambda: {3: "x"}, line_fixes=lambda: {"a": "b"}))
+        self.assertEqual((resolved["line_edits"], resolved["line_fixes"]), ({3: "x"}, {"a": "b"}))
+        self.assertTrue(callable(cfg["line_edits"]))   # the loaded config is not changed
+
+        def broken():
+            return {}["missing"]
+
+        with self.assertRaises(SystemExit) as cm:
+            extract.resolve_config(dict(cfg, line_fixes=broken))
+        self.assertIn("a-src: line_fixes failed (", str(cm.exception))
+        self.assertIn("KeyError: 'missing'", str(cm.exception))
+
+    def test_main_extracts_named_sources_and_rejects_unknown_ones(self):
+        self.write("Sources/x.md", "## War\n\nWar began.\n")
+        old = extract.SOURCE_CONFIGS
+        extract.SOURCE_CONFIGS = self.folder({"a_src.py": self.config("a-src")})
+        try:
+            code, out = quiet(extract.main, ["a-src"])
+            self.assertEqual(code, 0)
+            self.assertTrue(os.path.exists(os.path.join(extract.OUT, "a-src", "01-war.md")))
+            self.assertEqual(quiet(extract.main, ["--check"])[0], 0)
+            for argv, message in ((["nope"], "no source has slug 'nope'"), (["--bogus"], "unknown option --bogus")):
+                with self.assertRaises(SystemExit) as cm:
+                    quiet(extract.main, argv)
+                self.assertIn(message, str(cm.exception))
+        finally:
+            extract.SOURCE_CONFIGS = old
+
+    def test_project_configs_load_validate_and_are_named_by_slug(self):
+        # Vacuous until the project has configs; then every one must pass.
+        for cfg in extract.all_sources(extract.SOURCE_CONFIGS)[len(extract.SOURCES_CONFIG):]:
+            self.assertEqual(extract.validate_config(cfg), [], cfg["slug"])
+            name = cfg["slug"].replace("-", "_") + ".py"
+            self.assertTrue(os.path.exists(os.path.join(extract.SOURCE_CONFIGS, name)), name)
+
+    def test_example_config_loads_validates_and_resolves(self):
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "SourceConfigs",
+                            "_example_md.py")
+        spec = importlib.util.spec_from_file_location("example_md", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        cfg = module.CONFIG
+        self.assertEqual(extract.validate_config(cfg), [])
+        self.assertEqual(cfg["register"], "modern")   # a 1937 text
+        lines = ["Line %d of the book." % n for n in range(1, 461)]
+        lines[454] = "Tbe tide turned."
+        lines[300] = "Translator's note: a harbour term."
+        self.write("Sources/penhale-grey-harbour.md", "\n".join(lines) + "\n")
+        edits = extract.resolve_config(cfg)["line_edits"]
+        self.assertEqual(sorted(edits), [212, 214, 288, 290, 301, 455])
+        self.assertEqual(edits[455], "The tide turned.")
+
+
+class FileNumbers(unittest.TestCase):
+    def test_default_is_list_order(self):
+        self.assertEqual(extract.file_numbers([{}, {}, {}]), [1, 2, 3])
+
+    def test_file_no_keeps_a_later_chapter_first(self):
+        # An existing chapter (no file_no) listed after chapters added before it keeps 01.
+        chapters = [{"file_no": 2}, {"file_no": 3}, {}, {"file_no": 4}]
+        self.assertEqual(extract.file_numbers(chapters), [2, 3, 1, 4])
+        self.assertEqual(extract.file_numbers([{"file_no": 1}, {}, {}]), [1, 2, 3])
+
+    def test_validation(self):
+        ch = {"unit_id": "ch-01", "slug": "a", "title": "T"}
+        cfg = {"md": "src.md", "slug": "src", "part": 1,
+               "chapters": [dict(ch, file_no=2), dict(ch, unit_id="ch-02", slug="b")]}
+        self.assertEqual(extract.validate_config(cfg), [])
+        cfg["chapters"][1]["file_no"] = 2
+        self.assertIn("duplicate file_no", " | ".join(extract.validate_config(cfg)))
+        cfg["chapters"][1]["file_no"] = 0
+        self.assertIn("file_no 0 must be a whole number from 1 up", " | ".join(extract.validate_config(cfg)))
+
+
+class ValidateConfig(unittest.TestCase):
+    CH = {"unit_id": "ch-01", "slug": "a", "title": "T"}
+
+    def errors(self, **cfg):
+        return " | ".join(extract.validate_config(dict({"slug": "s", "chapters": [dict(self.CH)]}, **cfg)))
+
+    def test_exactly_one_source_file(self):
+        self.assertIn("set exactly one source file, pdf, epub, txt, or md (found none)", self.errors())
+        self.assertIn("(found pdf, md)", self.errors(md="a.md", pdf="a.pdf"))
+
+    def test_line_edits_and_line_fixes(self):
+        self.assertEqual(self.errors(md="a.md", line_edits={3: "x"}, line_fixes={"a": "b"}), "")
+        self.assertEqual(self.errors(md="a.md", line_edits=lambda: {}, line_fixes=lambda: {}), "")
+        self.assertIn("line_edits are for docling Markdown sources only",
+                      self.errors(txt="a.txt", line_edits={3: "x"}, chapters=[dict(self.CH, start=1, end=1)]))
+        self.assertIn("bad entries: 0, '3'", self.errors(md="a.md", line_edits={0: "x", "3": "y"}))
+        self.assertIn("line_fixes must map", self.errors(md="a.md", line_fixes={1: "b"}))
+
+    def test_paged_text_keys(self):
+        txt = {"txt": "a.txt", "chapters": [dict(self.CH, start=1, end=2)]}
+        self.assertEqual(self.errors(paragraphs="blank_lines", build_txt=lambda path: None, **txt), "")
+        self.assertIn("paragraphs must be", self.errors(paragraphs="lines", **txt))
+        self.assertIn("paragraphs must be", self.errors(md="a.md", paragraphs="blank_lines"))
+        self.assertIn("build_txt must be a callable", self.errors(build_txt="make.py", **txt))
+        self.assertIn("needs start and end PDF pages", self.errors(pdf="a.pdf"))
+
+    def test_register_is_modern_or_source_on_the_source_and_each_chapter(self):
+        self.assertEqual(self.errors(md="a.md", register="modern", chapters=[dict(self.CH, register="source")]), "")
+        self.assertEqual(self.errors(md="a.md"), "")   # unset: a warning when extracted, not an error
+        for bad in ("", "old", "Modern", None):
+            self.assertIn("s: register %r must be \"modern\"" % bad, self.errors(md="a.md", register=bad))
+            self.assertIn("s: chapter 'ch-01': register %r must be \"modern\"" % bad,
+                          self.errors(md="a.md", chapters=[dict(self.CH, register=bad)]))
+
+
+class PdfChapterCuts(unittest.TestCase):
+    """PDF chapters can start and end mid-page (first_line, stop_line)."""
+
+    def extract(self, ch, cfg=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            make_pdf(os.path.join(tmp, "src.pdf"), [
+                [(100, "End of the last chapter."), (300, "New Chapter"), (400, "The new chapter starts here.")],
+                [(100, "It goes on to the end."), (300, "Next Chapter"), (400, "Other text.")],
+            ])
+            old = extract.SOURCES
+            extract.SOURCES = tmp
+            try:
+                log = RepairLog()
+                cfg = dict({"pdf": "src.pdf", "header_ymax": 0, "footer_ymin": 10000}, **(cfg or {}))
+                ex = extract.with_char_map(quiet(extract.make_extractor, cfg, log)[0], cfg, log)
+                return [strip_comments(p) for p in ex(dict({"unit_id": "ch-02", "title": "New Chapter"}, **ch))], log
+            finally:
+                extract.SOURCES = old
+
+    def test_first_and_last_pages_are_cut(self):
+        paras, log = self.extract({"start": 1, "end": 2, "first_line": "The new chapter", "stop_line": "Next Chapter"})
+        self.assertEqual(paras, ["The new chapter starts here.", "It goes on to the end."])
+        self.assertEqual([r[3] for r in log.rows if r[2] == "heading-stripped"], ["End of the last chapter.", "New Chapter"])
+        self.assertNotIn("heading-not-found", log.kinds())
+
+    def test_one_page_chapter_and_missing_prefix(self):
+        paras, _ = self.extract({"start": 2, "end": 2, "stop_line": "Next Chapter"})
+        self.assertEqual(paras, ["It goes on to the end."])
+        with self.assertRaises(SystemExit) as cm:
+            self.extract({"start": 1, "end": 1, "first_line": "Nowhere"})
+        self.assertIn("first_line 'Nowhere' not found", str(cm.exception))
+
+    def test_char_map_on_pdf_paragraphs(self):
+        paras, log = self.extract({"start": 2, "end": 2, "stop_line": "Next Chapter"}, {"char_map": {"goes": "went"}})
+        self.assertEqual(paras, ["It went on to the end."])
+        self.assertIn(("ch-02", None, "char-mapped", "ch-02: 'goes' -> 'went' x1"), log.rows)
+
+
+class CharMapAndPrivateUse(unittest.TestCase):
+    def test_char_map_applied_and_logged(self):
+        log = RepairLog()
+        f = extract.with_char_map(lambda ch: ['England "” Thomas Hobbes "” has', "plain"],
+                                  {"char_map": {'"”': "—"}}, log)
+        self.assertEqual(f({"unit_id": "u"}), ["England — Thomas Hobbes — has", "plain"])
+        self.assertEqual(log.kinds(), ["char-mapped"])
+
+    def test_no_char_map_returns_extractor(self):
+        g = lambda ch: ["x"]  # noqa: E731
+        self.assertIs(extract.with_char_map(g, {}), g)
+
+    def test_private_use_characters_are_logged_once_each(self):
+        log = RepairLog()
+        f = extract.with_private_use_log(lambda ch: ["<!-- page 4 -->\nBorn in .", "x"], log)
+        self.assertEqual(f({"unit_id": "u"})[1], "x")
+        self.assertEqual([r[3] for r in log.rows],
+                         ["U+F731 x2, first in: Born in .",
+                          "U+F737 x1, first in: Born in .",
+                          "U+F738 x1, first in: Born in ."])
+        self.assertEqual(set(log.kinds()), {"private-use"})
+
+
+class PagedTextOptions(TempProject, unittest.TestCase):
+    """Paged TXT: blank-line paragraphs, Work/ paths, build_txt, and table rows."""
+
+    def test_blank_lines_make_the_paragraphs(self):
+        lines = ["A Short Heading", "Body line one that is short.", "", "Second para,", "continues here.", "",
+                 "1. A note", "2. Another"]
+        cfg = {"paragraphs": "blank_lines"}
+        self.assertEqual(extract.txt_paragraphs(lines, cfg, DocEvidence(), 70),
+                         ["A Short Heading Body line one that is short.", "Second para, continues here.",
+                          "1. A note 2. Another"])
+        import re
+        self.assertEqual(extract.txt_paragraphs(lines, cfg, DocEvidence(), 70, para_start=re.compile(r"^\d\.\s"))[-2:],
+                         ["1. A note", "2. Another"])
+        self.assertEqual(extract.txt_paragraphs(lines[:2], {}, DocEvidence(), 70),
+                         ["A Short Heading", "Body line one that is short."])
+
+    def test_work_path_and_build_txt(self):
+        self.assertEqual(extract.txt_path({"txt": "a.txt"}), os.path.join(self.tmp, "Sources", "a.txt"))
+        path = extract.txt_path({"txt": "Work/Raw/s/paged.txt"})
+        self.assertEqual(path, os.path.join(self.tmp, "Work/Raw/s/paged.txt"))
+        calls = []
+
+        def build(p):
+            calls.append(p)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("Page one.\n\fPage two.\n")
+
+        cfg = {"slug": "s", "txt": "Work/Raw/s/paged.txt", "build_txt": build}
+        quiet(extract.ensure_txt, cfg)
+        quiet(extract.ensure_txt, cfg)
+        self.assertEqual(calls, [path])            # not rebuilt while the file exists
+        quiet(extract.ensure_txt, cfg, True)
+        self.assertEqual(len(calls), 2)            # --rebuild-txt
+        self.assertEqual(extract.txt_page_texts(path), ["Page one.\n", "Page two.\n"])
+        with self.assertRaises(SystemExit) as cm:
+            extract.ensure_txt({"slug": "s", "txt": "Work/missing.txt"})
+        self.assertIn("set build_txt", str(cm.exception))
+
+    def test_table_rows_join_into_one_block(self):
+        paras = ["Lead-in:", "| A | B |", "| --- | --- |", "| 1 | 2 |", "After."]
+        self.assertEqual(extract.join_table_rows(paras),
+                         ["Lead-in:", "| A | B |\n| --- | --- |\n| 1 | 2 |", "After."])
+        self.assertEqual(extract.join_table_rows(["a | b", "| A |"]), ["a | b", "| A |"])
+
+
+class ReextractionCheck(TempProject, unittest.TestCase):
+    """extract.py --check: re-extract into temporary folders and compare with Work/Chapters."""
+
+    CFG = {"md": "src.md", "slug": "src", "title": "Book", "part": 1,
+           "chapters": [{"unit_id": "ch-01", "slug": "war", "title": "War"}]}
+
+    def test_identical_then_changed_then_missing(self):
+        self.write("Sources/src.md", "## War\n\nWar began.\n")
+        self.assertTrue(quiet(extract.extract_source, self.CFG)[0])
+        chapters = extract.OUT
+        self.assertEqual(quiet(extract.check_sources, [self.CFG])[0], 0)
+        self.assertEqual(extract.OUT, chapters)      # restored after the check
+        path = os.path.join(chapters, "src", "01-war.md")
+        with open(path, "a", encoding="utf-8", newline="\n") as f:
+            f.write("A hand edit.\n")
+        problems, out = quiet(extract.check_sources, [self.CFG])
+        self.assertEqual(problems, 1)
+        self.assertIn("DIFFERS Work/Chapters/src/01-war.md", out)
+        self.assertIn("-A hand edit.", out)
+        os.rename(path, os.path.join(chapters, "src", "01-peace.md"))
+        problems, out = quiet(extract.check_sources, [self.CFG])
+        self.assertEqual(problems, 2)
+        self.assertIn("NEW Work/Chapters/src/01-war.md", out)
+        self.assertIn("MISSING Work/Chapters/src/01-peace.md", out)
+
+    def test_a_stopped_run_still_writes_the_repair_log(self):
+        self.write("Sources/t.txt", "Chapter One\n\nThe boats came home.\n")
+        cfg = {"txt": "t.txt", "slug": "t", "title": "T", "part": 1,
+               "chapters": [{"unit_id": "ch-01", "slug": "a", "title": "A", "start": 1, "end": 1,
+                             "first_line": "Nowhere"}]}
+        with self.assertRaises(SystemExit):
+            quiet(extract.extract_source, cfg)
+        self.assertTrue(os.path.exists(os.path.join(extract.RAW, "t", "repairs.tsv")))
+
+    def test_config_errors_stop_before_anything_is_written(self):
+        cfg = dict(self.CFG, line_edits={0: "x"})
+        with self.assertRaises(SystemExit) as cm:
+            quiet(extract.extract_source, cfg)
+        self.assertIn("config errors in src:", str(cm.exception))
+        self.assertFalse(os.path.exists(os.path.join(extract.OUT, "src")))
+        self.assertFalse(quiet(extract.extract_source, dict(self.CFG, chapters=[]))[0])
+
+
+class Register(TempProject, unittest.TestCase):
+    """The source's register (a chapter's own overrides it) goes into each chapter file's frontmatter."""
+
+    MD = "## War\n\nWar began.\n\n## Peace\n\nPeace came.\n"
+    CHAPTERS = [{"unit_id": "ch-01", "slug": "war", "title": "War"},
+                {"unit_id": "ch-02", "slug": "peace", "title": "Peace"}]
+
+    def config(self, slug, register=None, chapter_registers=(None, None)):
+        chapters = [dict(ch, register=r) if r else dict(ch) for ch, r in zip(self.CHAPTERS, chapter_registers)]
+        cfg = {"md": "src.md", "slug": slug, "title": "Book", "part": 1, "chapters": chapters}
+        if register:
+            cfg["register"] = register
+        return cfg
+
+    def front(self, slug, name):
+        return parse_frontmatter(Path(extract.OUT, slug, name).read_text(encoding="utf-8"))[0]
+
+    def setUp(self):
+        super().setUp()
+        self.write("Sources/src.md", self.MD)
+
+    def test_frontmatter_order_and_chapter_override(self):
+        _, out = quiet(extract.extract_source, self.config("src", "modern", (None, "source")))
+        war = self.front("src", "01-war.md")
+        self.assertEqual(list(war), ["source", "source_slug", "unit_id", "part", "chapter", "title", "register",
+                                     "pdf_pages", "printed_pages", "word_count"])
+        self.assertEqual(war["register"], "modern")
+        self.assertEqual(self.front("src", "02-peace.md")["register"], "source")
+        self.assertIn('title: "War"\nregister: "modern"\npdf_pages: ""\n',
+                      Path(extract.OUT, "src", "01-war.md").read_text(encoding="utf-8"))
+        self.assertNotIn("register not set", out)
+
+    def test_unset_register_is_source_with_one_warning_per_source(self):
+        folder = os.path.join(self.tmp, "Configs")
+        os.makedirs(folder)
+        configs = {"a_src.py": self.config("a-src"), "b_src.py": self.config("b-src", "modern"),
+                   "c_src.py": self.config("c-src", None, ("modern", "source")),
+                   "d_src.py": self.config("d-src", None, ("modern", None))}
+        for name, cfg in configs.items():
+            self.write(os.path.join("Configs", name), "CONFIG = %r\n" % cfg)
+        old = extract.SOURCE_CONFIGS
+        extract.SOURCE_CONFIGS = folder
+        try:
+            code, out = quiet(extract.main, [])
+        finally:
+            extract.SOURCE_CONFIGS = old
+        self.assertEqual(code, 0, out)
+        warnings = [ln for ln in out.splitlines() if "register not set" in ln]
+        self.assertEqual(warnings, ["WARNING a-src: register not set; using source (plan.md Preflight)",
+                                    "WARNING d-src: register not set; using source (plan.md Preflight)"])
+        self.assertEqual([self.front("a-src", n)["register"] for n in ("01-war.md", "02-peace.md")],
+                         ["source", "source"])
+        self.assertEqual([self.front("d-src", n)["register"] for n in ("01-war.md", "02-peace.md")],
+                         ["modern", "source"])
+
+    def test_invalid_register_stops_before_anything_is_written(self):
+        with self.assertRaises(SystemExit) as cm:
+            quiet(extract.extract_source, self.config("src", None, (None, "victorian")))
+        self.assertIn("src: chapter 'ch-02': register 'victorian' must be", str(cm.exception))
+        self.assertFalse(os.path.exists(os.path.join(extract.OUT, "src")))
+
+
+class CountWordsOfFiles(TempProject, unittest.TestCase):
+    def test_frontmatter_is_not_counted(self):
+        self.write("Sources/src.md", "## War\n\n<!-- page break -->\n\nWar began in the spring.\n")
+        cfg = {"md": "src.md", "slug": "src", "title": "Book", "part": 1,
+               "chapters": [{"unit_id": "ch-01", "slug": "war", "title": "War"}]}
+        quiet(extract.extract_source, cfg)
+        path = os.path.join(extract.OUT, "src", "01-war.md")
+        self.assertIn("word_count: 5\n", Path(path).read_text(encoding="utf-8"))
+        self.assertEqual(words_of(path), 5)
+
+    def test_files_without_frontmatter_are_counted_whole(self):
+        self.assertEqual(words_of(self.write("a.md", "## Heading\n\nFour words of summary.\n")), 4)
+        self.assertEqual(words_of(self.write("b.md", "---\nno closing line\n")), 4)
+
+
+class ChapterScan(TempProject, unittest.TestCase):
+    """check_chapters.py: forbidden characters, warnings, and boundary paragraphs."""
+
+    RAW = ('---\nsource: "Book"\nword_count: 999\n---\n\n# War\n\n'
+           '<!-- page 3 -->\nThe war began in the spring.\n\n'
+           'Smith &amp; Jones of AT&T; met � there.\n\n'
+           "A run  of words , a popu- lation, pre- and post-war, Polish'spring and Penhale's boat.\n\n"
+           '> A quoted line that runs on for more than ten words and then stops\n\n'
+           'This paragraph also runs on for more than ten words and stops without\n\n'
+           'A Section Heading\n\n'
+           'Last body paragraph ends here.\n\n'
+           'Notes to this chapter (printed as footnotes in the source):\n\n'
+           '<!-- footnote on page 3 -->\n1 A note without an end\n')
+
+    def test_errors_warnings_and_boundaries(self):
+        result = check_chapters.scan(self.RAW)
+        self.assertEqual(result["errors"], [(11, "U+FFFD replacement character x1: ...mith &amp; Jones of AT&T; met "
+                                                 "� there."),
+                                            (11, "HTML entity x1: Smith &amp; Jones of AT&T; met � there.")])
+        messages = [m.split(":")[0] for _, m in result["warnings"]]
+        self.assertEqual(messages, ["word_count 999 in the frontmatter, 80 on a recount", "double space",
+                                    "space before punctuation", "hyphen-space (x- y)",
+                                    "letter, quotation mark, letter run together",
+                                    "paragraph does not end a sentence", "paragraph does not end a sentence"])
+        self.assertIn("Polish'spring", result["warnings"][4][1])
+        # The short unpunctuated line reads as a section heading and is not flagged.
+        self.assertEqual([n for n, m in result["warnings"] if m.startswith("paragraph")], [15, 17])
+        self.assertEqual(result["first"], "The war began in the spring.")
+        self.assertEqual(result["last"], "Last body paragraph ends here.")
+
+    def test_names_and_series_items_are_not_flagged(self):
+        raw = ('---\nword_count: 29\n---\n\n# T\n\nCh’en and Dong’an met o\'clock-wise at Penhale\'s quay, '
+               'and the students’ union met too.\n\n'
+               'That the council shall meet monthly in the hall of the harbour board at Northgate;\n')
+        self.assertEqual(check_chapters.scan(raw)["warnings"], [])
+
+    def test_every_forbidden_kind(self):
+        for text in ("xy", "co­operate", "&#8212;", "ﬁrst", "GLYPH<c=3>", "@@furniture 12"):
+            raw = '---\nword_count: 1\n---\n\n# T\n\n%s\n' % text
+            self.assertEqual(len(check_chapters.scan(raw)["errors"]), 1, text)
+
+    def test_extract_labels_come_from_common(self):
+        from common import NOTES_LABELS
+        self.assertEqual((extract.FOOTNOTES_LABEL, extract.NOTES_LABEL), NOTES_LABELS)
+        raw = ('---\nword_count: 1\n---\n\n# T\n\nBody ends.\n\n%s\n\n1 A note without an end\n' % NOTES_LABELS[1])
+        self.assertEqual(check_chapters.scan(raw)["warnings"][1:], [])
+        self.assertEqual(check_chapters.scan(raw)["last"], "Body ends.")
+
+    def test_main_exit_status(self):
+        old = check_chapters.CHAPTERS
+        check_chapters.CHAPTERS = Path(self.tmp) / "Chapters"
+        try:
+            self.write("Chapters/src/01-war.md", '---\nword_count: 2\n---\n\n# War\n\nWar began.\n')
+            self.write("Chapters/src/parts/01-war-part1-of-2.md", "Bad �.\n")
+            code, out = quiet(check_chapters.main, ["src"])
+            self.assertEqual(code, 0, out)
+            self.assertIn("1 chapter file(s): 0 with forbidden characters, 0 warning(s)", out)
+            self.write("Chapters/src/02-peace.md", '---\nword_count: 2\n---\n\n# Peace\n\nPeace �.\n')
+            code, out = quiet(check_chapters.main, [])
+            self.assertEqual(code, 1)
+            self.assertIn("ERROR line 7: U+FFFD", out)
+            with self.assertRaises(SystemExit) as cm:
+                check_chapters.main(["nope"])
+            self.assertIn("no chapter folder Work/Chapters/nope", str(cm.exception))
+        finally:
+            check_chapters.CHAPTERS = old
+
+
+class MarkdownToc(unittest.TestCase):
+    MD = ("# The Grey Harbour\n\nBy Ada Penhale.\n\n<!-- page break -->\n\nTHE GREY HARBOUR\n\n## 1 The Quay\n\n"
+          "The boats came \"home\" at dawn — late.\n\n<!-- image -->\n\nTHE GREY HARBOUR\n\n"
+          "A popu- lation of *fishers* &amp; others.\n\n<!-- page break -->\n\nTHE GREY HARBOUR\n\n"
+          "## 2 The Tide\n\nIt’s low - again.\n")
+
+    def test_heading_table_and_counts(self):
+        out = md_toc.toc(self.MD, "grey.md")
+        self.assertEqual(out[0], "# grey.md: 31 words, 3 headings, 25 lines")
+        self.assertEqual(out[1], "# placeholders: page break 2; image 1; formula 0; other comment lines: none")
+        self.assertIn("HTML entities 1", out[2])
+        self.assertEqual(out[3], "# quotes: straight \" 2, ' 0; curly “ 0, ” 0, ‘ 0, ’ 1")
+        self.assertEqual(out[4], "# dashes: em — 1, en – 0; spaced hyphen \" - \" 1; hyphen-space \"x- y\" 1")
+        self.assertEqual(out[5], "# emphasis spans (*x* or **x**): 1")
+        self.assertEqual(out[6], "# repeated short paragraphs (running heads?): 'THE GREY HARBOUR' x3")
+        self.assertEqual(out[8:], ["     0       0  (start)", "     1       6  # The Grey Harbour",
+                                   "     9      21  ## 1 The Quay", "    23       4  ## 2 The Tide"])

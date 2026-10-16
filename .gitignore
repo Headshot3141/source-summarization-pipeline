@@ -5,7 +5,9 @@ __pycache__/
 # Original source documents: large binaries that never change
 Sources/
 
-# Rendered and intermediate outputs, rebuilt from Summary.md
-Summary.pdf
+# Rendered and intermediate outputs, rebuilt from Summary.md. The PDF and
+# EPUB are named from TITLE in Work/build_pdf.py (Summary.pdf by default), so
+# every PDF and EPUB at the project root is ignored.
+/*.pdf
+/*.epub
 Work/summary.html
-Summary.epub

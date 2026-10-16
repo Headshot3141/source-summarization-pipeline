@@ -1,4 +1,4 @@
-"""Render Summary.md to Summary.pdf, then check the PDF text against it.
+"""Render Summary.md to the PDF, then check the PDF text against it.
 
 Summary.md -> styled HTML (Python-Markdown + Jinja2, written to
 Work/summary.html) -> PDF (headless Microsoft Edge) -> page numbers
@@ -11,6 +11,19 @@ Markdown. To rerun only the check on an existing PDF:
 
     python Work/check_pdf_text.py
 
+The PDF is named after TITLE (OUTPUT_NAME: "The Grey Harbour: Essays" is
+written to The-Grey-Harbour-Essays.pdf at the project root; the default
+TITLE gives Summary.pdf), and Work/build_epub.py names the EPUB the same
+way. Each `#` heading (the Introduction and each part) starts a page, so the
+last page of a part is often short and the thin-page warning lists it.
+
+Printing. Headless Edge prints with --print-to-pdf. Edge has been seen to
+return from it before the file was written (the PDF appeared seconds
+later), so each attempt waits up to PDF_WAIT seconds for a complete file.
+If neither headless mode produces one, the page is printed through Edge's
+DevTools protocol (Page.printToPDF), which needs aiohttp. The build prints
+which route it used; record it in Work/checks.md.
+
 Text fidelity. The summary reproduces source text exactly, so the renderer
 must not change a character. Python-Markdown would: `*x*`, `_x_` and `**x**`
 become emphasis, `<...>` becomes raw HTML, `\\` escapes vanish, `[x](y)`
@@ -18,9 +31,13 @@ becomes a link, a line of `===` or `---` becomes a heading, and so on.
 markdown_source() therefore keeps only the structure the pipeline writes
 and turns every other Markdown-significant ASCII character (ESCAPE_CHARS)
 into a numeric character reference, which Python-Markdown passes through
-untouched and the browser shows as the original character. Typographic
-quotes, apostrophes, dashes, and ellipses are not ASCII and pass through;
-no extension that rewrites them (such as smarty) is enabled.
+untouched and the browser shows as the original character. The one markup
+kept is italics: a single-asterisk span (EMPHASIS_RE), as in a book title or
+a foreign word the source sets in italics, becomes an <em> element without
+its asterisks, and Work/check_pdf_text.py drops the same asterisks
+(strip_emphasis) before comparing words. Typographic quotes, apostrophes,
+dashes, and ellipses are not ASCII and pass through; no extension that
+rewrites them (such as smarty) is enabled.
 
 Structure kept (parse_lines()):
 - A line `# `, `## ` or `### ` followed by text is a heading. Deeper levels
@@ -53,18 +70,46 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
 import markdown
 import pymupdf
 from jinja2 import Template
+from common import utf8_output
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MD = os.path.join(ROOT, "Summary.md")
 HTML = os.path.join(ROOT, "Work", "summary.html")
-PDF = os.path.join(ROOT, "Summary.pdf")
 TITLE = "Summary"
+
+
+# Letters Unicode does not decompose into an ASCII letter and an accent.
+_FOLD = str.maketrans({"ß": "ss", "Æ": "AE", "æ": "ae", "Œ": "OE", "œ": "oe", "Ø": "O", "ø": "o",
+                       "Ł": "L", "ł": "l", "Đ": "D", "đ": "d", "Ð": "D", "ð": "d", "Þ": "Th",
+                       "þ": "th", "ı": "i"})
+
+
+def output_name(title):
+    """File name stem for the PDF and EPUB: the title's ASCII-folded words joined by hyphens.
+
+    Accents are dropped ("Économie" gives "Economie") and apostrophes removed
+    ("Penhale’s" gives "Penhales"). Every other character that is not an
+    ASCII letter or digit separates words, so an em dash between two words
+    does not join them. A title with no ASCII letters or digits gives
+    "Summary".
+    """
+    folded = unicodedata.normalize("NFKD", title.translate(_FOLD))
+    folded = "".join(c for c in folded if not unicodedata.combining(c))
+    folded = re.sub("['\u2019\u02bc]", "", folded)
+    return "-".join(re.findall(r"[A-Za-z0-9]+", folded)) or "Summary"
+
+
+OUTPUT_NAME = output_name(TITLE)
+PDF = os.path.join(ROOT, OUTPUT_NAME + ".pdf")
+PDF_WAIT = 60  # seconds to wait for Edge's file after --print-to-pdf returns
 
 # Python-Markdown configuration shared with Work/build_epub.py. Do not add
 # smarty or any extension that rewrites characters.
@@ -76,6 +121,13 @@ MD_EXTENSIONS = ["extra", "sane_lists"]
 # fenced code, setext headings, rules). Escaped everywhere in text.
 ESCAPE_CHARS = "\\`*_{}[]()#+-.!:|=~<>&"
 _ESCAPE_TABLE = {ord(c): "&#%d;" % ord(c) for c in ESCAPE_CHARS}
+
+# A single-asterisk span is italics (titles, foreign words, formula letters;
+# writing-rules.md). It opens after anything but a letter or asterisk,
+# closes before anything but one, and holds no asterisk or line break:
+# "*polis*", "100*C*+100*V*". Every other asterisk, "**", and "_x_" stay
+# literal text.
+EMPHASIS_RE = re.compile(r"(?<![^\W\d_])(?<!\*)\*(?=[^\s*])([^*\n]+?)(?<=[^\s*])\*(?![^\W\d_])(?!\*)")
 
 HEADING_RE = re.compile(r"^(#{1,3})[ \t]+(\S.*?)[ \t]*$")
 QUOTE_RE = re.compile(r"^[ ]{0,3}>[ ]?(.*)$")
@@ -101,13 +153,17 @@ body {
   color: #111;
   margin: 0;
 }
+/* The Introduction and each part start on a new page. */
 h1 {
   font-size: 18pt;
   line-height: 1.3;
-  margin: 1.6em 0 0.4em;
+  margin: 0 0 0.4em;
+  break-before: page;
   page-break-after: avoid;
 }
-h1:first-child { margin-top: 0; }
+h1:first-child { break-before: auto; }
+/* Italics inside a heading already set in italics show upright. */
+h3 em { font-style: normal; }
 h2 {
   font-size: 14pt;
   line-height: 1.35;
@@ -144,6 +200,22 @@ def escape_text(text):
     return text.translate(_ESCAPE_TABLE)
 
 
+def strip_emphasis(text):
+    """text without the asterisks of its italic spans: the text the PDF shows."""
+    return EMPHASIS_RE.sub(r"\1", text)
+
+
+def render_inline(text):
+    """escape_text(text), with each italic span (EMPHASIS_RE) as an <em> element."""
+    out, pos = [], 0
+    for m in EMPHASIS_RE.finditer(text):
+        out.append(escape_text(text[pos:m.start()]))
+        out.append("<em>%s</em>" % escape_text(m.group(1)))
+        pos = m.end()
+    out.append(escape_text(text[pos:]))
+    return "".join(out)
+
+
 @dataclass
 class Line:
     """One Summary.md line split into structure and literal text.
@@ -170,7 +242,7 @@ class Line:
             prefix += " "
         if self.kind in ("heading", "item"):
             prefix += self.marker + " "
-        return prefix + escape_text(self.text)
+        return prefix + render_inline(self.text)
 
 
 def _item(line):
@@ -339,29 +411,138 @@ def render_html(md_path=MD, html_path=HTML):
         fh.write(html)
 
 
+def _wait_for_pdf(path, timeout=None):
+    """True once path holds a complete PDF (size steady, %%EOF at its end), False at the timeout."""
+    deadline = time.monotonic() + (PDF_WAIT if timeout is None else timeout)
+    last = -1
+    while True:
+        size = os.path.getsize(path) if os.path.exists(path) else 0
+        if size > 0 and size == last:
+            with open(path, "rb") as fh:
+                fh.seek(max(0, size - 1024))
+                if b"%%EOF" in fh.read():
+                    return True
+        last = size
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
+
+
 def print_pdf(edge, tmp_pdf, html_path=HTML):
+    """Print html_path to tmp_pdf with headless Edge; return the route that worked."""
     url = Path(html_path).resolve().as_uri()
     failures = []
-    # A separate profile keeps an open Edge window from taking over the print job.
-    with tempfile.TemporaryDirectory(prefix="edge-profile-") as profile:
+    # A separate profile keeps an open Edge window from taking over the print job. Edge's helper
+    # processes can hold the profile's lockfile after the print returns, so cleanup errors are ignored.
+    with tempfile.TemporaryDirectory(prefix="edge-profile-", ignore_cleanup_errors=True) as profile:
         base = [edge, "--no-first-run", "--no-default-browser-check",
                 "--user-data-dir=" + profile,
                 "--disable-gpu", "--run-all-compositor-stages-before-draw",
                 "--virtual-time-budget=10000",
                 "--no-pdf-header-footer", "--print-to-pdf-no-header"]
-        for mode in ("--headless=new", "--headless"):
-            if os.path.exists(tmp_pdf):
-                os.remove(tmp_pdf)
-            cmd = base + [mode, "--print-to-pdf=" + tmp_pdf, url]
-            result = subprocess.run(cmd, capture_output=True, text=True,
-                                    errors="replace", timeout=180)
-            produced = os.path.exists(tmp_pdf) and os.path.getsize(tmp_pdf) > 0
-            if result.returncode == 0 and produced:
-                return
+        for n, mode in enumerate(("--headless=new", "--headless")):
+            # Each attempt prints to its own file, so a late write from an earlier
+            # attempt cannot land in the PDF a later attempt produced.
+            out = os.path.join(profile, "attempt%d.pdf" % n)
+            cmd = base + [mode, "--print-to-pdf=" + out, url]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True,
+                                        errors="replace", timeout=180)
+            except subprocess.TimeoutExpired:
+                failures.append("%s: no exit after 180 s" % mode)
+                continue
+            if result.returncode == 0 and _wait_for_pdf(out):
+                shutil.copyfile(out, tmp_pdf)
+                return "--print-to-pdf " + mode
             failures.append("%s: exit %d%s\n%s" % (
-                mode, result.returncode, "" if produced else ", no PDF",
+                mode, result.returncode,
+                ", no complete PDF after %s s" % PDF_WAIT if result.returncode == 0 else "",
                 result.stderr.strip() or "(no stderr)"))
+    try:
+        print_pdf_devtools(edge, tmp_pdf, url)
+        return "DevTools Page.printToPDF"
+    except Exception as exc:  # report every route that failed
+        failures.append("DevTools Page.printToPDF: %s" % exc)
     raise SystemExit("Edge failed to produce a PDF\n" + "\n".join(failures))
+
+
+def print_pdf_devtools(edge, tmp_pdf, url, timeout=120):
+    """Print url to tmp_pdf through headless Edge's DevTools protocol (Page.printToPDF).
+
+    The fallback when --print-to-pdf produces no PDF. Needs aiohttp. The
+    options match --print-to-pdf with --no-pdf-header-footer: the page size
+    and margins come from the stylesheet's @page rule, backgrounds print, and
+    there is no browser header or footer. Printing waits for the document and
+    its fonts to finish loading. Edge picks a free debugging port and writes
+    it to DevToolsActivePort in the profile, so another browser on a fixed
+    port is never driven by mistake.
+    """
+    import asyncio
+    import base64
+    import json
+    import urllib.request
+
+    try:
+        import aiohttp
+    except ImportError:
+        raise RuntimeError("needs aiohttp (pip install aiohttp; see requirements.txt)")
+
+    async def run(port):
+        endpoint = "http://127.0.0.1:%d" % port
+        req = urllib.request.Request(endpoint + "/json/new?" + url, method="PUT")
+        target = json.loads(urllib.request.urlopen(req, timeout=10).read())
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(target["webSocketDebuggerUrl"], max_msg_size=0) as ws:
+                counter = [0]
+
+                async def call(method, **params):
+                    counter[0] += 1
+                    await ws.send_json({"id": counter[0], "method": method, "params": params})
+                    while True:
+                        msg = await ws.receive_json()
+                        if msg.get("id") == counter[0]:
+                            if "error" in msg:
+                                raise RuntimeError("%s: %s" % (method, msg["error"]))
+                            return msg["result"]
+
+                deadline = time.monotonic() + timeout
+                while True:
+                    state = await call("Runtime.evaluate", expression="document.readyState")
+                    if state["result"].get("value") == "complete":
+                        break
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("page did not finish loading")
+                    await asyncio.sleep(0.5)
+                await call("Runtime.evaluate", expression="document.fonts.ready.then(() => true)",
+                           awaitPromise=True)
+                result = await call("Page.printToPDF", printBackground=True, preferCSSPageSize=True,
+                                    displayHeaderFooter=False, transferMode="ReturnAsBase64")
+                with open(tmp_pdf, "wb") as fh:
+                    fh.write(base64.b64decode(result["data"]))
+
+    with tempfile.TemporaryDirectory(prefix="edge-profile-", ignore_cleanup_errors=True) as profile:
+        proc = subprocess.Popen(
+            [edge, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+             "--user-data-dir=" + profile, "--remote-debugging-port=0", "about:blank"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            port_file = os.path.join(profile, "DevToolsActivePort")
+            deadline = time.monotonic() + 30
+            while not (os.path.exists(port_file) and os.path.getsize(port_file) > 0):
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Edge wrote no DevToolsActivePort file")
+                time.sleep(0.2)
+            with open(port_file, encoding="utf-8") as fh:
+                port = int(fh.readline())
+            asyncio.run(run(port))
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+    if not (os.path.exists(tmp_pdf) and os.path.getsize(tmp_pdf) > 0):
+        raise RuntimeError("no PDF written")
 
 
 def add_page_numbers(tmp_pdf, pdf_path=PDF):
@@ -389,7 +570,7 @@ def build(md_path=MD, html_path=HTML, pdf_path=PDF):
     fd, tmp_pdf = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
     try:
-        print_pdf(edge, tmp_pdf, html_path)
+        print("printed with " + print_pdf(edge, tmp_pdf, html_path))
         pages = add_page_numbers(tmp_pdf, pdf_path)
     finally:
         if os.path.exists(tmp_pdf):
@@ -398,8 +579,7 @@ def build(md_path=MD, html_path=HTML, pdf_path=PDF):
 
 
 def main():
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(errors="backslashreplace")  # report any character on any console
+    utf8_output()
     pages = build(MD, HTML, PDF)
     print("wrote %s: %d pages" % (PDF, pages))
     import check_pdf_text  # imports this module, so load it only when needed

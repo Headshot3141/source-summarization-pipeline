@@ -1,7 +1,11 @@
+import difflib
 import html
+import importlib.util
 import os
 import re
 import sys
+import tempfile
+import traceback
 import zipfile
 from collections import Counter
 from html.parser import HTMLParser
@@ -9,7 +13,8 @@ from html.parser import HTMLParser
 import pymupdf
 from spellchecker import SpellChecker
 
-from common import PAGE_MARKER, ends_sentence, is_heading, strip_comments, yaml_value
+from common import (DEFAULT_REGISTER, NOTES_LABELS, PAGE_MARKER, REGISTERS, ends_sentence, is_heading,
+                    strip_comments, utf8_output, yaml_value)
 from count_words import words_in_text
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -79,59 +84,138 @@ CITATION_ONLY = re.compile(r"^\([^()]*\d[^()]*\)$")
 # ends a quotation (verse is often one paragraph per line).
 BLOCK_QUOTE_WINDOW = 8
 
+# Each source's config lives in its own file, Work/SourceConfigs/<slug with
+# underscores>.py, defining a dict CONFIG in the format of the commented
+# examples in SOURCES_CONFIG below (see that folder's README.md). The files
+# are loaded at run time after the entries of SOURCES_CONFIG (all_sources),
+# which stays empty: its examples only document the keys.
+SOURCE_CONFIGS = os.path.join(ROOT, "Work", "SourceConfigs")
+# The values of "register" (see below), and the one a source without it gets.
+
+# Keys every source takes: "slug", "title", "part", "chapters", and exactly
+# one of "pdf", "epub", "txt", "md" (the source file, in Sources/), and
+# "register", set in Preflight (plan.md): "modern" when the English text
+# being summarized dates from before 1950, or is a later translation that
+# reads as antiquated, so the summary is written in plain modern English;
+# "source" for English from 1950 on (the normal clarity rules). A chapter's
+# own "register" overrides the source's, for an edited collection that
+# mixes old and new texts. Each chapter file's frontmatter carries its
+# register, which make_prompts.py gives the agents as REGISTER. A source
+# without one gets "source" and a warning on every run.
+# Each chapter has unit_id (stable and unique within this source: ch-01,
+# appendix-a, ...), slug (used in the filename), title, num (the printed
+# chapter label, or None if none), and printed_pages. Chapter files are
+# named NN-slug.md, NN counting chapters in list order (which must be
+# document order). Optional "file_no" fixes a chapter's NN instead, and the
+# others take the unused numbers in order: give it to chapters added before
+# an existing one, so the existing file keeps its name (see file_numbers).
+# line_fixes, and the Markdown key line_edits, may be a zero-argument
+# callable that returns the dict, so that a config file never reads the
+# source when it is imported: extract.py calls it only for the sources it
+# extracts (resolve_config).
 SOURCES_CONFIG = [
-    {
-        # PDF source.
-        "slug": "",
-        "pdf": "",
-        "title": "",
-        "part": 1,
-        # Text above header_ymax or below footer_ymin (PDF points) is dropped.
-        # 0 and 10000 turn the cutoffs off.
-        "header_ymax": 0,
-        "footer_ymin": 10000,
-        # Optional "hyphenates": True/False overrides line-end hyphenation
-        # detection. Set it when the detector disagrees with the page images.
-        # Optional "space_repair": {font name: em factor}. Use when a text
-        # layer drops the space glyph in some fonts, leaving only a gap; a
-        # space is inserted where the gap exceeds factor * font size. Calibrate
-        # the factor against known word gaps (0.08 worked on one serif face).
-        "chapters": [
-            # unit_id: stable and unique within this source (ch-01, appendix-a, ...).
-            # slug: used in the filename. num: printed chapter label, or None if none.
-            # start/end: one-based inclusive PDF pages.
-            # Optional title_alt: extra heading spellings to strip, such as a
-            # heading with an OCR error ("The Quiet Harhour").
-            {"unit_id": "", "slug": "", "title": "", "start": 1, "end": 1, "num": None, "printed_pages": ""},
-        ],
-    },
+    # PDF source.
+    # {
+    #     "slug": "",
+    #     "pdf": "",
+    #     "title": "",
+    #     "part": 1,
+    #     # "modern" or "source", from Preflight (see above); "" stops the run
+    #     # until it is set.
+    #     "register": "",
+    #     # Text above header_ymax or below footer_ymin (PDF points) is dropped.
+    #     # 0 and 10000 turn the cutoffs off.
+    #     "header_ymax": 0,
+    #     "footer_ymin": 10000,
+    #     # Optional "hyphenates": True/False overrides line-end hyphenation
+    #     # detection. Set it when the detector disagrees with the page images.
+    #     # Optional "space_repair": {font name: em factor}. Use when a text
+    #     # layer drops the space glyph in some fonts, leaving only a gap; a
+    #     # space is inserted where the gap exceeds factor * font size. Calibrate
+    #     # the factor against known word gaps (0.08 worked on one serif face).
+    #     # Optional "char_map": {from: to}, applied to each extracted paragraph
+    #     # and logged as char-mapped. Only for an encoding fault of the text
+    #     # layer that the page image shows (two quotation marks printed where
+    #     # the page has an em dash; a font's private-use old-style figures,
+    #     # {chr(0xF730 + i): str(i) for i in range(10)}), never to correct the
+    #     # author.
+    #     "chapters": [
+    #         # start/end: one-based inclusive PDF pages. A chapter that starts
+    #         # or ends mid-page sets first_line (the prefix of the paragraph it
+    #         # starts with, on its start page) or stop_line (the prefix of the
+    #         # first paragraph after it, on its end page), as for paged TXT;
+    #         # paragraphs before first_line are logged as heading-stripped,
+    #         # and no other heading is stripped.
+    #         # Optional title_alt: extra heading spellings to strip, such as a
+    #         # heading with an OCR error ("The Quiet Harhour").
+    #         {"unit_id": "", "slug": "", "title": "", "start": 1, "end": 1, "num": None, "printed_pages": ""},
+    #         {"unit_id": "", "slug": "", "title": "", "start": 2, "end": 9, "num": None, "printed_pages": "",
+    #          "first_line": "", "stop_line": ""},
+    #     ],
+    # },
     # EPUB source. Prefer an EPUB when the PDF text layer is damaged (wrong
     # ligature glyphs, missing spaces). Each chapter names its XHTML file in
     # the archive. Page markers come from print-page anchors whose id starts
     # with epub_page_anchor ("page_" for <a id="page_12"/>); without anchors
     # the chapter has no page markers. epub_heading_classes lists the class
     # attributes of the heading elements to drop (chapter number and title).
+    # A chapter made of several archive files lists them, in order, as
+    # "files" instead of "file": the heading classes are dropped from the
+    # first file only, and later files' headings stay as plain section-heading
+    # lines. epub_skip_classes lists classes dropped with their content in
+    # every file (navigation links and similar furniture). char_map works as
+    # for PDF sources.
     # {
     #     "slug": "",
     #     "epub": "",
     #     "title": "",
     #     "part": 2,
+    #     "register": "",
     #     "epub_page_anchor": "page_",
     #     "epub_heading_classes": ["chno", "chtitle"],
+    #     "epub_skip_classes": [],
     #     "chapters": [
     #         {"unit_id": "ch-01", "slug": "", "title": "", "num": 1, "file": "OEBPS/ch01.xhtml", "printed_pages": ""},
+    #         {"unit_id": "ch-02", "slug": "", "title": "", "num": 2, "printed_pages": "",
+    #          "files": ["OEBPS/ch02.xhtml", "OEBPS/ch02a.xhtml"]},
     #     ],
     # },
     # Paged .txt source: a pdftotext dump with a form feed per PDF page (piece
-    # k = PDF page k). Use when only a text dump exists. Lines are cleaned per
-    # page: running heads (header_patterns, footer_patterns), drop caps, and
-    # junk lines are dropped; line_fixes replaces whole lines the dump mangled
-    # (letter-spaced or two-line headings: "\nHeading\n" makes a block).
+    # k = PDF page k). Use when only a text dump exists, or write one from a
+    # PDF whose pages the PDF route cannot cut (build_txt). "txt" names a file
+    # in Sources/, or, starting "Work/", a file the project builds, from the
+    # project root (Sources/ holds the user's originals only). Optional
+    # "build_txt": a callable that takes that path and writes the file; it
+    # runs when the file is missing, and on every run with --rebuild-txt.
+    # Lines are cleaned per page, in this order: ligatures and char_map
+    # ({from: to}, applied to every line, unlogged; for encoding faults only,
+    # as for PDF sources); line_fixes, which replaces whole lines the dump
+    # mangled (letter-spaced or two-line headings: "\nHeading\n" makes a
+    # block); drop caps; running heads. Running heads are dropped from the
+    # top of each page while lines match header_patterns (or are a bare page
+    # number), and from the bottom while they match footer_patterns (or are a
+    # bare page number), within the first header_scan non-blank lines from
+    # each end (default 8); junk_lines (whole lines, compared lowercased with
+    # spaces collapsed) are dropped anywhere. A line_fixes key that matches no
+    # line is logged as line-fix-unused and printed as a warning.
+    # Paragraphs: blank lines separate blocks; inside a block a paragraph ends
+    # at a line that ends a sentence (or a colon) and falls short of the
+    # line width (line_width, default the median full line), and a short
+    # first line that reads as a heading is a paragraph of its own. Set
+    # "paragraphs": "blank_lines" when the file's blank lines are its
+    # paragraph breaks (a file built from the PDF's layout): each block is
+    # then one paragraph, with no width, heading, or colon rules. Consecutive
+    # paragraphs that are each one Markdown table row ("| a | b |", written
+    # through line_fixes) are joined into one table block.
+    # "hyphenates" (default True): False keeps every line-end hyphen as text.
     # Set "dehyphenated": True if the dump joined hyphen-ended lines and
-    # dropped the hyphen ("workingclass"); hyphen_fixes lists hand-checked
-    # repairs. "kerning_spaces": True restores spaces lost after punctuation
-    # before T, V, W, Y. "notes" attaches endnotes printed at the back to each
-    # chapter (pages, and a heading pattern whose group is the chapter key).
+    # dropped the hyphen ("workingclass"); hyphen_fixes ({word: repaired
+    # word}) lists hand-checked repairs. "kerning_spaces": True restores spaces
+    # lost after punctuation before T, V, W, Y. "notes" attaches endnotes
+    # printed at the back to each chapter: their PDF pages (start, end), a
+    # heading pattern whose group 1 is the chapter key (a chapter's "notes"
+    # value), and optional para_start, the pattern of a line that starts a new
+    # note (default r"^\d{1,3}\.\s").
     # "block_quotes": True marks block quotations with "> " (see
     # mark_block_quotes); block_quote_fixes holds hand-checked corrections,
     # and not_headings lists first lines the heading rule must skip.
@@ -141,11 +225,17 @@ SOURCES_CONFIG = [
     #     "txt": "",
     #     "title": "",
     #     "part": 3,
+    #     "register": "",
     #     "header_patterns": [r"^[A-Z][A-Z'.,:&\- ]*$"],
+    #     "footer_patterns": [],
+    #     "header_scan": 8,
+    #     "junk_lines": [],
+    #     "char_map": {},
     #     "dehyphenated": False,
+    #     "hyphen_fixes": {},
     #     "kerning_spaces": False,
     #     "line_fixes": {},
-    #     "notes": {"start": 300, "end": 310, "heading": r"^Chapter (\d+)$"},
+    #     "notes": {"start": 300, "end": 310, "heading": r"^Chapter (\d+)$", "para_start": r"^\d{1,3}\.\s"},
     #     "block_quotes": True,
     #     "block_quote_fixes": {"join": [], "start": [], "end": [], "add": [], "remove": []},
     #     "not_headings": [],
@@ -213,13 +303,25 @@ SOURCES_CONFIG = [
     # strip_emphasis removes *italic* and **bold** markers (default: kept).
     # hyphen_spaces: True rejoins "popu- lation", a line-end hyphen kept
     # with a space, by the hyphenation rules; False keeps and logs each.
+    # line_edits ({line number: text}) edits the file by line number before
+    # anything else, each edit logged as line-edited: "" drops the line, and
+    # a text with "\n" becomes several lines ("\n\n" splits a paragraph). A
+    # line number past the end of the file stops the run. Build it with
+    # source_helpers.build_line_edits (rebuilt lines, word repairs, joins,
+    # swaps, moves, drops, "> " quotations, a proofreading pass), which
+    # checks each edit against the line it changes, inside a callable:
+    # "line_edits": lambda: build_line_edits(MD, ...). Prefer it to
+    # line_fixes for a repair at one place: a line_fixes key is a whole
+    # line's text and applies wherever that text occurs. A figure or table
+    # transcription goes in the same way, at its place in the text.
     # line_fixes, char_map, hyphenates, block_quotes, and block_quote_fixes
-    # work as for paged TXT.
+    # work as for paged TXT; line_fixes and char_map apply after line_edits.
     # {
     #     "slug": "",
     #     "md": "",
     #     "title": "",
     #     "part": 4,
+    #     "register": "",
     #     "page_break": "<!-- page break -->",
     #     "first_page": 1,
     #     "skip_pages": [],
@@ -231,6 +333,7 @@ SOURCES_CONFIG = [
     #     "not_headings": [],
     #     "strip_emphasis": False,
     #     "hyphen_spaces": False,
+    #     "line_edits": lambda: build_line_edits(MD, drops={212: "Translator's note"}),
     #     "line_fixes": {},
     #     "block_quotes": True,
     #     "block_quote_fixes": {"join": [], "start": [], "end": [], "add": [], "remove": []},
@@ -270,8 +373,15 @@ class RepairLog:
       blockquote-nocite, -multi,          block quotation marked on weaker evidence; review each
       blockquote-no-leadin, -epigraph
       blockquote-fixed                    marked or unmarked by the source's block_quote_fixes
+      line-fixed                          whole line replaced by the source's line_fixes
+      line-fix-unused                     a line_fixes key that matched no line (stale or
+                                          mistyped; once per key, no unit)
+      char-mapped                         PDF and EPUB: char_map replaced characters (count)
+      private-use                         a private-use character (U+E000-U+F8FF) left in the
+                                          chapter: an unmapped glyph; map it with char_map
     Docling Markdown sources also log (page is a PDF page, or "line N" of the
     .md file when the export has no page-break placeholders):
+      line-edited                         line changed by line_edits, by line number
       no-page-markers                     the file has no page_break placeholders (once)
       page-count-mismatch                 page count differs from last_page
       chapter-start-ambiguous             the chapter's start heading recurs inside it
@@ -653,10 +763,13 @@ class EpubText(HTMLParser):
     BLOCK = {"p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "br", "tr", "blockquote"}
     VOID = {"br", "img", "hr", "meta", "link", "input", "col", "area", "base", "wbr", "source"}
 
-    def __init__(self, anchor=DEFAULT_PAGE_ANCHOR, skip_classes=()):
+    def __init__(self, anchor=DEFAULT_PAGE_ANCHOR, skip_classes=(), heading_classes=None):
         super().__init__(convert_charrefs=True)
         self.anchor = anchor
         self.skip_classes = set(skip_classes)
+        # Classes that count as the chapter heading (default: every skipped class).
+        self.heading_classes = self.skip_classes if heading_classes is None else set(heading_classes)
+        self.heading_seen = 0     # skipped elements that were headings
         self.blocks = []
         self.cur = ""
         self.skip = 0
@@ -686,6 +799,8 @@ class EpubText(HTMLParser):
             self.flush()
             self.dropped = 1
             self.dropped_seen += 1
+            if classes & self.heading_classes:
+                self.heading_seen += 1
             if page is not None and self.first_anchor is None:
                 self.first_anchor = page
             return
@@ -728,17 +843,21 @@ class EpubText(HTMLParser):
         self.cur = ""
 
 
-def epub_paragraphs(raw, ch, log=None, anchor=DEFAULT_PAGE_ANCHOR, heading_classes=DEFAULT_HEADING_CLASSES):
-    """Return block paragraphs for one EPUB chapter, with page markers.
+def epub_paragraphs(raw, ch, log=None, anchor=DEFAULT_PAGE_ANCHOR, heading_classes=DEFAULT_HEADING_CLASSES,
+                    skip_classes=(), expect_heading=True):
+    """Return block paragraphs for one EPUB chapter file, with page markers.
 
     Heading elements whose class is in heading_classes are dropped (their
     text lives in the frontmatter); a page anchor inside one still marks the
-    chapter's first page. A page anchor that opens a paragraph gets its
-    marker on its own line; one inside a paragraph stays inline at the seam.
+    chapter's first page. Elements whose class is in skip_classes are dropped
+    too, but do not count as the heading. A page anchor that opens a paragraph
+    gets its marker on its own line; one inside a paragraph stays inline at
+    the seam. expect_heading=False (a later file of a multi-file chapter)
+    skips the heading-not-found log.
     """
     if log is not None:
         log.unit = ch["unit_id"]
-    parser = EpubText(anchor, heading_classes)
+    parser = EpubText(anchor, tuple(heading_classes) + tuple(skip_classes), heading_classes)
     parser.feed(raw)
     parser.flush()
     paras = []
@@ -750,20 +869,31 @@ def epub_paragraphs(raw, ch, log=None, anchor=DEFAULT_PAGE_ANCHOR, heading_class
             paras.append(text)
     if parser.first_anchor is not None:
         paras.insert(0, PAGE_MARKER % parser.first_anchor)
-    if not parser.dropped_seen:
+    if expect_heading and not parser.heading_seen:
         _log(log, None, "heading-not-found", ch["title"])
     return paras
+
+
+def chapter_files(ch):
+    """The archive files of an EPUB chapter, in order: "files", or ["file"]."""
+    return list(ch.get("files") or [ch["file"]])
 
 
 def make_epub_extractor(cfg, log=None):
     path = os.path.join(SOURCES, cfg["epub"])
     anchor = cfg.get("epub_page_anchor", DEFAULT_PAGE_ANCHOR)
-    classes = cfg.get("epub_heading_classes", DEFAULT_HEADING_CLASSES)
+    classes = tuple(cfg.get("epub_heading_classes", DEFAULT_HEADING_CLASSES))
+    skip = tuple(cfg.get("epub_skip_classes", ()))
 
     def extractor(ch):
+        paras = []
         with zipfile.ZipFile(path) as z:
-            raw = z.read(ch["file"]).decode("utf-8")
-        return epub_paragraphs(raw, ch, log, anchor, classes)
+            for i, name in enumerate(chapter_files(ch)):
+                raw = z.read(name).decode("utf-8")
+                # The chapter heading is dropped from the first file only.
+                paras += epub_paragraphs(raw, ch, log, anchor, classes if i == 0 else (), skip,
+                                         expect_heading=(i == 0))
+        return paras
 
     return extractor
 
@@ -776,12 +906,13 @@ def save_epub_raw(cfg):
     with zipfile.ZipFile(os.path.join(SOURCES, cfg["epub"])) as z:
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             for ch in cfg["chapters"]:
-                f.write("<!-- file %s -->\n\n" % ch["file"])
-                parser = EpubText(cfg.get("epub_page_anchor", DEFAULT_PAGE_ANCHOR))
-                parser.feed(z.read(ch["file"]).decode("utf-8"))
-                parser.flush()
-                blocks = [MARK_RE.sub(lambda m: PAGE_MARKER % int(m.group(1)), b) for b in parser.blocks]
-                f.write("\n\n".join(blocks) + "\n")
+                for name in chapter_files(ch):
+                    f.write("<!-- file %s -->\n\n" % name)
+                    parser = EpubText(cfg.get("epub_page_anchor", DEFAULT_PAGE_ANCHOR))
+                    parser.feed(z.read(name).decode("utf-8"))
+                    parser.flush()
+                    blocks = [MARK_RE.sub(lambda m: PAGE_MARKER % int(m.group(1)), b) for b in parser.blocks]
+                    f.write("\n\n".join(blocks) + "\n")
     return path
 
 
@@ -796,6 +927,36 @@ PAGE_NUM_LINE = re.compile(r"^(?:\d{1,4}|[ivxlcdm]{1,7})$", re.I)
 # A drop cap set on its own line: "I" / "n 1831 Edith Varga" -> "In 1831".
 DROP_CAP = re.compile(r"^[A-Z]$")
 DROP_CAP_REST = re.compile(r"^[a-z.’']")
+
+
+def txt_path(cfg):
+    """The path of a paged .txt source: in Sources/, or from the project root if it starts with Work/.
+
+    A paged text the project writes from a PDF (build_txt) is a work file,
+    not an original, so it lives under Work/ and the config names it from
+    the project root ("Work/Raw/{slug}/paged.txt").
+    """
+    name = cfg["txt"]
+    if name.replace("\\", "/").startswith("Work/"):
+        return os.path.join(ROOT, name)
+    return os.path.join(SOURCES, name)
+
+
+def ensure_txt(cfg, rebuild=False):
+    """Run the source's build_txt when its paged text is missing, or always with rebuild; return the path.
+
+    build_txt is called with the path to write. Stops the run if the file is
+    still missing afterwards.
+    """
+    path = txt_path(cfg)
+    build = cfg.get("build_txt")
+    if build is not None and (rebuild or not os.path.exists(path)):
+        print("%s: building %s (build_txt)" % (cfg["slug"], path))
+        build(path)
+    if not os.path.exists(path):
+        raise SystemExit("%s: paged text %s not found%s" % (cfg["slug"], path, "" if build else
+                                                             " (set build_txt to write it from the PDF)"))
+    return path
 
 
 def txt_page_texts(path):
@@ -973,8 +1134,14 @@ def txt_paragraphs(lines, cfg, ev, width, log=None, page=None, para_start=None):
     a paragraph when the next line starts with a capital or an opening
     quotation mark, and a line ending in a block citation ends one too, so
     a block quotation is a paragraph of its own (see mark_block_quotes).
+
+    With "paragraphs": "blank_lines" each block is one paragraph (split only
+    at para_start): a file written from the PDF's layout already has a blank
+    line at every paragraph break, and the width, heading, and colon rules
+    would split short justified lines and two-line headings.
     """
     bq = cfg.get("block_quotes", False)
+    by_block = cfg.get("paragraphs") == "blank_lines"
     blocks, cur = [], []
     for ln in lines:
         if ln.strip():
@@ -995,11 +1162,13 @@ def txt_paragraphs(lines, cfg, ev, width, log=None, page=None, para_start=None):
             if para_start is not None and group and para_start.match(ln):
                 paras.append(join_lines(group, ev, log, page))
                 group = []
-            if (i == 0 and len(block) > 1 and len(ln) < 0.7 * width and is_heading(ln) and block[1][:1].isupper()
-                    and not any(ln.startswith(x) for x in cfg.get("not_headings", []))):
+            if (not by_block and i == 0 and len(block) > 1 and len(ln) < 0.7 * width and is_heading(ln)
+                    and block[1][:1].isupper() and not any(ln.startswith(x) for x in cfg.get("not_headings", []))):
                 paras.append(ln)
                 continue
             group.append(ln.replace("­", "-") if ln.endswith("­") else ln)
+            if by_block:
+                continue
             tail = len(ln) - width if len(ln) > 1.3 * width else len(ln)
             nxt = block[i + 1] if i + 1 < len(block) else ""
             if bq and (BLOCK_CITATION.search(ln) or (ln.endswith(":") and re.match(r"[A-Z“‘\"']", nxt))):
@@ -1018,7 +1187,7 @@ def txt_paragraphs(lines, cfg, ev, width, log=None, page=None, para_start=None):
 KERNING_GAP = re.compile(r"(?<=[A-Za-z][.,;:?!])(?=[TVWY][a-z]|“)")
 
 
-def apply_line_fixes(lines, cfg, log=None, page=None):
+def apply_line_fixes(lines, cfg, log=None, page=None, used=None):
     """Apply a source's exact line replacements and kerning-gap repair.
 
     line_fixes maps a whole stripped line to its replacement, for text the
@@ -1026,12 +1195,16 @@ def apply_line_fixes(lines, cfg, log=None, page=None):
     replacement may contain newlines: an empty line around a heading makes
     it a block of its own. kerning_spaces restores the space the dump lost
     after punctuation before T, V, W, Y, or an opening quotation mark.
+    used, if given, is a set that collects the keys that matched, so a key
+    that never matches can be reported (report_unused_line_fixes).
     """
     fixes = cfg.get("line_fixes", {})
     out = []
     for ln in lines:
         s = ln.strip()
         if s in fixes:
+            if used is not None:
+                used.add(s)
             _log(log, page, "line-fixed", "%s -> %s" % (s, fixes[s].strip() or "(dropped)"))
             out.extend(fixes[s].split("\n") if fixes[s] else [])
             continue
@@ -1044,8 +1217,28 @@ def apply_line_fixes(lines, cfg, log=None, page=None):
     return out
 
 
+def report_unused_line_fixes(cfg, used, log=None):
+    """Log and print each line_fixes key that matched no line; return them.
+
+    A key is a whole line's text, so a key with a typo, or one left behind
+    after the source or an earlier fix changed the line, matches nothing
+    and would otherwise be silently ignored. Logged as line-fix-unused, with
+    no unit (the source as a whole).
+    """
+    unused = [k for k in cfg.get("line_fixes", {}) if k not in used]
+    unit = log.unit if log is not None else ""
+    if log is not None:
+        log.unit = ""
+    for key in unused:
+        _log(log, None, "line-fix-unused", "line_fixes key matches no line: %r" % key)
+        print("WARNING %s: line_fixes key matches no line: %r" % (cfg.get("slug"), key))
+    if log is not None:
+        log.unit = unit
+    return unused
+
+
 def _cut_page(lines, first_line=None, stop_line=None, log=None, page=None):
-    """Keep a page's lines from first_line on and before stop_line (prefix matches)."""
+    """Keep a page's lines (or paragraphs) from first_line on and before stop_line (prefix matches)."""
     lines = list(lines)
     if first_line:
         idx = next((i for i, ln in enumerate(lines) if ln.strip().startswith(first_line)), None)
@@ -1069,7 +1262,8 @@ class TxtSource:
     def __init__(self, cfg, log=None):
         self.cfg = cfg
         self.log = log
-        self.pages = txt_page_texts(os.path.join(SOURCES, cfg["txt"]))
+        self.fixes_used = set()   # line_fixes keys that matched (report_unused_line_fixes)
+        self.pages = txt_page_texts(txt_path(cfg))
         self.width = cfg.get("line_width") or txt_line_width(self.pages)
         # Spelling evidence comes from ordinary lines only: an overlong line in
         # a dehyphenating dump holds a join whose spelling is in question.
@@ -1085,7 +1279,7 @@ class TxtSource:
     def page_lines(self, no, first_line=None, stop_line=None):
         """Cleaned lines of PDF page no, cut to a unit's boundaries."""
         lines = [clean_txt_line(ln, self.cfg) for ln in self.pages[no - 1].splitlines()]
-        lines = apply_line_fixes(lines, self.cfg, self.log, no)
+        lines = apply_line_fixes(lines, self.cfg, self.log, no, self.fixes_used)
         # Drop caps first: a lone capital would otherwise read as a running head.
         lines = join_drop_caps(lines, self.log, no)
         lines = strip_txt_furniture(lines, self.cfg, self.log, no)
@@ -1119,7 +1313,8 @@ class TxtSource:
         return out
 
 
-NOTES_LABEL = "Notes to this chapter (printed at the back of the book):"
+# The label above endnotes printed at the back of the book (common.NOTES_LABELS).
+NOTES_LABEL = NOTES_LABELS[1]
 
 
 def _prefix_quote(para):
@@ -1304,9 +1499,30 @@ def make_txt_extractor(cfg, log=None):
                 note_paras = mark_block_quotes(note_paras, log, fixes, start)
             note_paras[0] = re.sub(r"^(<!-- page \d+ -->\n)?", lambda m: (m.group(0) or "") + NOTES_LABEL + "\n\n", note_paras[0], count=1)
             paras += note_paras
-        return paras
+        return join_table_rows(paras)
 
+    # The caller reports the line_fixes keys no page used, once every chapter is extracted.
+    extractor.source = src
     return extractor
+
+
+TABLE_ROW = re.compile(r"^\|.*\|$")
+
+
+def join_table_rows(paras):
+    """Join consecutive paragraphs that are each one Markdown table row into one block.
+
+    The TXT path makes every block a paragraph, so a table written row by
+    row through line_fixes would come out one row per paragraph; the word
+    counter and the splitter expect a table as a single block.
+    """
+    out = []
+    for p in paras:
+        if TABLE_ROW.match(p) and out and all(TABLE_ROW.match(l) for l in out[-1].split("\n")):
+            out[-1] += "\n" + p
+        else:
+            out.append(p)
+    return out
 
 
 def save_txt_raw(cfg):
@@ -1315,7 +1531,7 @@ def save_txt_raw(cfg):
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, "raw.txt")
     with open(path, "w", encoding="utf-8", newline="\n") as f:
-        for i, page in enumerate(txt_page_texts(os.path.join(SOURCES, cfg["txt"])), 1):
+        for i, page in enumerate(txt_page_texts(txt_path(cfg)), 1):
             f.write(PAGE_MARKER % i + "\n" + page + "\n")
     return path
 
@@ -1459,7 +1675,8 @@ MD_ITEM_START = re.compile(r"^(?:\||[-*+]\s|\d{1,3}[.)]\s)")
 HYPHEN_SPACE = re.compile(r"(?<![\w-])([A-Za-z]+)- ([a-z]+)")
 SUSPENDED_NEXT = {"and", "or", "nor", "to", "und"}
 MD_TEXT_KINDS = ("heading", "para", "quote", "list", "table", "code")
-FOOTNOTES_LABEL = "Notes to this chapter (printed as footnotes in the source):"
+# The label above footnotes moved to the chapter end (common.NOTES_LABELS).
+FOOTNOTES_LABEL = NOTES_LABELS[0]
 
 
 def md_unescape(text, table=False, log=None, where=None, underscores=None):
@@ -1689,10 +1906,7 @@ class MdSource:
         self.cfg, self.log = cfg, log
         with open(os.path.join(SOURCES, cfg["md"]), encoding="utf-8-sig") as f:
             text = f.read()
-        numbered = []
-        for no, ln in enumerate(text.splitlines(), 1):
-            for fixed in apply_line_fixes([clean_txt_line(ln, cfg)], cfg, log, "line %d" % no):
-                numbered.append((no, fixed))
+        numbered = self._edited_lines(text.splitlines())
         self.blocks = md_parse(numbered, cfg.get("page_break", DEFAULT_PAGE_BREAK))
         self.paged = any(b["kind"] == "page" for b in self.blocks)
         self._number_pages()
@@ -1711,6 +1925,36 @@ class MdSource:
         self.bounds = self._find_bounds(cfg["chapters"])
         self._log_bounds(cfg["chapters"])
         self._check_empty(cfg["chapters"])
+
+    def _edited_lines(self, lines):
+        """(line number, line) pairs after line_edits, char_map, and line_fixes.
+
+        line_edits apply first, by line number, to the line as exported: ""
+        drops it, and a text with newlines becomes several lines, each keeping
+        the edited line's number. Each edit is logged as line-edited. A line
+        number past the end of the file stops the run: the edits were made
+        for another export of the file. line_fixes keys that match no line
+        are reported (report_unused_line_fixes).
+        """
+        cfg, log = self.cfg, self.log
+        edits = cfg.get("line_edits") or {}
+        past = sorted(n for n in edits if n > len(lines))
+        if past:
+            raise SystemExit("%s: line_edits for lines past the end of the file (%d lines): %s"
+                             % (cfg["md"], len(lines), ", ".join(map(str, past))))
+        used, numbered = set(), []
+        for no, ln in enumerate(lines, 1):
+            if no in edits:
+                new = edits[no]
+                _log(log, "line %d" % no, "line-edited", "%s -> %s" % (ln.strip()[:80], new.strip()[:80] or "(dropped)"))
+                parts = new.split("\n") if new else []
+            else:
+                parts = [ln]
+            for part in parts:
+                for fixed in apply_line_fixes([clean_txt_line(part, cfg)], cfg, log, "line %d" % no, used):
+                    numbered.append((no, fixed))
+        report_unused_line_fixes(cfg, used, log)
+        return numbered
 
     def _number_pages(self):
         cfg = self.cfg
@@ -2309,8 +2553,17 @@ def make_extractor(cfg, log=None):
             for p in range(ch["start"] - 1, ch["end"]):
                 paras = block_paragraphs(doc[p], cfg["header_ymax"], cfg["footer_ymin"], ev, log, cfg.get("space_repair"))
                 pages.append((p + 1, paras))
+        # A chapter that starts or ends mid-page is cut at the paragraphs
+        # first_line and stop_line begin, as a paged TXT chapter is cut at
+        # its lines. One that starts at first_line starts after its heading,
+        # so no heading is stripped.
+        if ch.get("first_line") or ch.get("stop_line"):
+            no, paras = pages[0]
+            pages[0] = (no, _cut_page(paras, ch.get("first_line"), None, log, no))
+            no, paras = pages[-1]
+            pages[-1] = (no, _cut_page(paras, None, ch.get("stop_line"), log, no))
         first = next((i for i, (_, paras) in enumerate(pages) if paras), None)
-        if first is not None:
+        if first is not None and not ch.get("first_line"):
             no, paras = pages[first]
             pages[first] = (no, strip_chapter_heading(paras, ch["title"], ch.get("num"), log, no, ch.get("title_alt")))
         return join_pages(pages, ev, log)
@@ -2318,13 +2571,117 @@ def make_extractor(cfg, log=None):
     return extractor
 
 
-def validate_config(cfg):
+def with_char_map(extractor, cfg, log=None):
+    """Apply a PDF or EPUB source's char_map to each extracted paragraph, logging each change.
+
+    For text-layer encoding faults the page image shows as one character,
+    such as an em dash the PDF prints as a quote pair. Each replacement is
+    logged as char-mapped with its count, per chapter. (TXT and Markdown
+    sources apply char_map to every line as it is read.)
+    """
+    cmap = cfg.get("char_map") or {}
+    if not cmap:
+        return extractor
+
+    def wrapped(ch):
+        paras = []
+        for p in extractor(ch):
+            for a, b in cmap.items():
+                n = p.count(a)
+                if n:
+                    p = p.replace(a, b)
+                    _log(log, None, "char-mapped", "%s: %r -> %r x%d" % (ch["unit_id"], a, b, n))
+            paras.append(p)
+        return paras
+
+    return wrapped
+
+
+PRIVATE_USE = re.compile("[\ue000-\uf8ff]")
+
+
+def with_private_use_log(extractor, log=None):
+    """Log each private-use character (U+E000-U+F8FF) left in a chapter, once per character, as private-use.
+
+    A text layer gives a glyph its font could not map to a character a
+    private-use code point (old-style figures, small capitals, ornaments).
+    It looks like nothing, or like the wrong letter, so it must be mapped
+    with the source's char_map once the page image shows what it is.
+    """
+    def wrapped(ch):
+        paras = extractor(ch)
+        found = Counter(c for p in paras for c in PRIVATE_USE.findall(p))
+        for c, n in sorted(found.items()):
+            text = strip_comments(next(p for p in paras if c in p))
+            k = text.index(c)
+            _log(log, None, "private-use", "U+%04X x%d, first in: %s" % (ord(c), n, text[max(0, k - 30):k + 30]))
+        return paras
+
+    return wrapped
+
+
+SOURCE_KINDS = ("pdf", "epub", "txt", "md")
+
+
+def _line_edit_problems(cfg, src):
+    """Problems with a source's line_fixes and line_edits.
+
+    Either may still be a callable (resolve_config calls it only for the
+    sources being extracted); its result is checked once resolved.
+    """
     errors = []
-    src = cfg.get("slug") or cfg.get("pdf") or cfg.get("epub") or cfg.get("txt") or cfg.get("md")
+    fixes = cfg.get("line_fixes")
+    if fixes is not None and not callable(fixes):
+        if not isinstance(fixes, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in fixes.items()):
+            errors.append("%s: line_fixes must map a line's text to its replacement text "
+                          "(or be a callable that returns such a dict)" % src)
+    edits = cfg.get("line_edits")
+    if edits is None:
+        return errors
+    if not cfg.get("md"):
+        errors.append("%s: line_edits are for docling Markdown sources only" % src)
+    elif not callable(edits):
+        if not isinstance(edits, dict):
+            errors.append("%s: line_edits must be a dict {line number: text} or a callable that returns one" % src)
+        else:
+            bad = [k for k, v in edits.items()
+                   if isinstance(k, bool) or not isinstance(k, int) or k < 1 or not isinstance(v, str)]
+            if bad:
+                errors.append("%s: line_edits keys must be line numbers from 1 and values text; bad entries: %s"
+                              % (src, ", ".join(map(repr, bad[:5]))))
+    return errors
+
+
+def validate_config(cfg):
+    """Problems with one source's config, as messages; an empty list when it is usable."""
+    errors = []
+    kinds = [k for k in SOURCE_KINDS if cfg.get(k)]
+    src = cfg.get("slug") or (cfg[kinds[0]] if kinds else None)
     if not cfg.get("slug"):
-        errors.append("source %r has no slug" % (cfg.get("pdf") or cfg.get("epub") or cfg.get("txt") or cfg.get("md")))
+        errors.append("source %r has no slug" % (cfg[kinds[0]] if kinds else None))
+    if len(kinds) != 1:
+        errors.append("%s: set exactly one source file, pdf, epub, txt, or md (found %s)"
+                      % (src, ", ".join(kinds) or "none"))
     epub = bool(cfg.get("epub"))
     md = bool(cfg.get("md"))
+    txt = bool(cfg.get("txt"))
+    errors += _line_edit_problems(cfg, src)
+    if "register" in cfg and cfg["register"] not in REGISTERS:
+        errors.append('%s: register %r must be "modern" (English from before 1950) or "source"'
+                      % (src, cfg["register"]))
+    if "char_map" in cfg and not isinstance(cfg["char_map"], dict):
+        errors.append("%s: char_map must be a dict {from: to}" % src)
+    if "paragraphs" in cfg and (not txt or cfg["paragraphs"] != "blank_lines"):
+        errors.append("%s: paragraphs must be \"blank_lines\" (or left out for the line-width rules), for paged "
+                      "TXT sources only" % src)
+    if "build_txt" in cfg and (not txt or not callable(cfg["build_txt"])):
+        errors.append("%s: build_txt must be a callable taking the paged text's path, for paged TXT sources only" % src)
+    nos = [ch["file_no"] for ch in cfg["chapters"] if "file_no" in ch]
+    for no in nos:
+        if isinstance(no, bool) or not isinstance(no, int) or no < 1:
+            errors.append("%s: file_no %r must be a whole number from 1 up" % (src, no))
+    if len(set(nos)) < len(nos):
+        errors.append("%s: duplicate file_no in %r" % (src, nos))
     seen = set()
     for ch in cfg["chapters"]:
         uid = ch.get("unit_id")
@@ -2335,15 +2692,22 @@ def validate_config(cfg):
         seen.add(uid)
         if not ch.get("slug"):
             errors.append("%s: chapter %r has no filename slug" % (src, uid))
+        if "register" in ch and ch["register"] not in REGISTERS:
+            errors.append('%s: chapter %r: register %r must be "modern" (English from before 1950) or "source"'
+                          % (src, uid, ch["register"]))
         if epub:
-            if not ch.get("file"):
+            if not (ch.get("file") or ch.get("files")):
                 errors.append("%s: chapter %r has no EPUB file" % (src, uid))
+            elif ch.get("file") and ch.get("files"):
+                errors.append("%s: chapter %r has both file and files" % (src, uid))
         elif md:
             if "start" in ch or "end" in ch:
                 errors.append("%s: chapter %r: Markdown chapters are bounded by heading, first_line, "
                               "and stop_line, not start/end pages" % (src, uid))
             if not (ch.get("title") or ch.get("heading") or ch.get("first_line") or ch.get("num") is not None):
                 errors.append("%s: chapter %r has no title, heading, num, or first_line to find its start" % (src, uid))
+        elif not isinstance(ch.get("start"), int) or not isinstance(ch.get("end"), int):
+            errors.append("%s: chapter %r needs start and end PDF pages" % (src, uid))
         elif ch["end"] < ch["start"]:
             errors.append("%s: chapter %r ends before it starts" % (src, uid))
     return errors
@@ -2365,11 +2729,52 @@ def save_raw(cfg):
     return path
 
 
-def build_markdown(src_title, part, chapters, extractor, slug, pdf=""):
+def file_numbers(chapters):
+    """The NN filename prefix of each chapter, in list order.
+
+    A chapter's optional "file_no" fixes its number; the others take the
+    unused numbers from 1 up, in list order. Without any file_no this is
+    1, 2, 3, ... Use it to keep an earlier chapter's filename when a
+    chapter that comes before it in the source is added later (chapters
+    must be listed in document order).
+    """
+    taken = {ch["file_no"] for ch in chapters if ch.get("file_no")}
+    nums, n = [], 0
+    for ch in chapters:
+        if ch.get("file_no"):
+            nums.append(ch["file_no"])
+            continue
+        n += 1
+        while n in taken:
+            n += 1
+        nums.append(n)
+    return nums
+
+
+def register_warning(cfg):
+    """The warning line for a source that leaves some chapter's register unset, or None.
+
+    The register changes how every agent writes the chapter, and Preflight
+    decides it from the date of the English text (plan.md). A forgotten one
+    would quietly give an old text the modern-text rules, so a source
+    without it is named on every run until Preflight sets it.
+    """
+    if "register" in cfg or all("register" in ch for ch in cfg.get("chapters", [])):
+        return None
+    return "WARNING %s: register not set; using %s (plan.md Preflight)" % (cfg.get("slug"), DEFAULT_REGISTER)
+
+
+def build_markdown(src_title, part, chapters, extractor, slug, pdf="", register=DEFAULT_REGISTER):
+    """Write each chapter file, Work/Chapters/{slug}/NN-slug.md: frontmatter, "# Title", and the text.
+
+    The frontmatter keys, in order (plan.md): source, source_slug, unit_id,
+    part, chapter, title, register, pdf_pages, printed_pages, word_count.
+    register is the source's; a chapter's own "register" overrides it.
+    """
     folder = os.path.join(OUT, slug)
     os.makedirs(folder, exist_ok=True)
     total_out = 0
-    for idx, ch in enumerate(chapters, 1):
+    for idx, ch in zip(file_numbers(chapters), chapters):
         paras = extractor(ch)
         body = "\n\n".join(paras) + "\n"
         wc = words_in_text(body)
@@ -2388,6 +2793,7 @@ def build_markdown(src_title, part, chapters, extractor, slug, pdf=""):
             ("part", part),
             ("chapter", None if label is None else str(label)),
             ("title", ch["title"]),
+            ("register", ch.get("register", register)),
             ("pdf_pages", pages),
             ("printed_pages", ch.get("printed_pages", "")),
             ("word_count", wc),
@@ -2412,7 +2818,9 @@ def build_md_source(cfg):
     log = RepairLog()
     log_path = os.path.join(RAW, cfg["slug"], "repairs.tsv")
     try:
-        build_markdown(cfg["title"], cfg["part"], cfg["chapters"], make_md_extractor(cfg, log), cfg["slug"], cfg["md"])
+        build_markdown(cfg["title"], cfg["part"], cfg["chapters"],
+                       with_private_use_log(make_md_extractor(cfg, log), log), cfg["slug"], cfg["md"],
+                       cfg.get("register", DEFAULT_REGISTER))
     except SystemExit:
         log.write(log_path)
         print("repair log (run stopped): %d entries -> %s" % (len(log.rows), log_path))
@@ -2423,62 +2831,270 @@ def build_md_source(cfg):
     print("repair log: %d entries -> %s" % (len(log.rows), log_path))
 
 
-if __name__ == "__main__":
-    ran = False
-    only = set(sys.argv[1:])  # optional: slugs to extract; default all
-    for cfg in SOURCES_CONFIG:
-        if only and cfg.get("slug") not in only:
-            continue
+def build_other_source(cfg, rebuild_txt=False):
+    """Extract a PDF, EPUB, or paged TXT source: raw text, chapter files, and repairs.tsv.
+
+    char_map applies to PDF and EPUB paragraphs here (TXT applies it per
+    line). As for Markdown, a run that stops still writes the repair log.
+    """
+    log = RepairLog()
+    log_path = os.path.join(RAW, cfg["slug"], "repairs.tsv")
+    try:
         if cfg.get("txt"):
-            if not cfg["chapters"]:
-                continue
-            problems = validate_config(cfg)
-            if problems:
-                raise SystemExit("SOURCES_CONFIG errors:\n  " + "\n  ".join(problems))
-            ran = True
+            ensure_txt(cfg, rebuild_txt)
             print("raw text -> %s" % save_txt_raw(cfg))
-            log = RepairLog()
-            build_markdown(cfg["title"], cfg["part"], cfg["chapters"], make_txt_extractor(cfg, log), cfg["slug"], cfg["txt"])
-            for kind, prefix in check_block_quote_fixes(cfg, os.path.join(OUT, cfg["slug"])):
-                print("WARNING block_quote_fixes %s matches no paragraph: %r" % (kind, prefix))
-            log_path = os.path.join(RAW, cfg["slug"], "repairs.tsv")
-            log.write(log_path)
-            print("repair log: %d entries -> %s" % (len(log.rows), log_path))
-            continue
-        if cfg.get("md"):
-            if not cfg["chapters"]:
-                continue
-            problems = validate_config(cfg)
-            if problems:
-                raise SystemExit("SOURCES_CONFIG errors:\n  " + "\n  ".join(problems))
-            ran = True
-            build_md_source(cfg)
-            continue
-        if cfg.get("epub"):
-            if not cfg["chapters"]:
-                continue
-            problems = validate_config(cfg)
-            if problems:
-                raise SystemExit("SOURCES_CONFIG errors:\n  " + "\n  ".join(problems))
-            ran = True
+            extractor = make_txt_extractor(cfg, log)
+        elif cfg.get("epub"):
             print("raw text -> %s" % save_epub_raw(cfg))
-            log = RepairLog()
-            build_markdown(cfg["title"], cfg["part"], cfg["chapters"], make_epub_extractor(cfg, log), cfg["slug"], cfg["epub"])
-            log_path = os.path.join(RAW, cfg["slug"], "repairs.tsv")
-            log.write(log_path)
-            print("repair log: %d entries -> %s" % (len(log.rows), log_path))
-            continue
-        if not cfg["pdf"] or not cfg["chapters"]:
-            continue
-        problems = validate_config(cfg)
-        if problems:
-            raise SystemExit("SOURCES_CONFIG errors:\n  " + "\n  ".join(problems))
-        ran = True
-        print("raw text -> %s" % save_raw(cfg))
-        log = RepairLog()
-        build_markdown(cfg["title"], cfg["part"], cfg["chapters"], make_extractor(cfg, log), cfg["slug"], cfg["pdf"])
-        log_path = os.path.join(RAW, cfg["slug"], "repairs.tsv")
+            extractor = with_char_map(make_epub_extractor(cfg, log), cfg, log)
+        else:
+            print("raw text -> %s" % save_raw(cfg))
+            extractor = with_char_map(make_extractor(cfg, log), cfg, log)
+        name = cfg.get("txt") or cfg.get("epub") or cfg.get("pdf")
+        build_markdown(cfg["title"], cfg["part"], cfg["chapters"], with_private_use_log(extractor, log), cfg["slug"],
+                       name, cfg.get("register", DEFAULT_REGISTER))
+    except SystemExit:
         log.write(log_path)
-        print("repair log: %d entries -> %s" % (len(log.rows), log_path))
+        print("repair log (run stopped): %d entries -> %s" % (len(log.rows), log_path))
+        raise
+    if cfg.get("txt"):
+        report_unused_line_fixes(cfg, extractor.source.fixes_used, log)
+        for kind, prefix in check_block_quote_fixes(cfg, os.path.join(OUT, cfg["slug"])):
+            print("WARNING block_quote_fixes %s matches no paragraph: %r" % (kind, prefix))
+    log.write(log_path)
+    print("repair log: %d entries -> %s" % (len(log.rows), log_path))
+
+
+# Config file of each source loaded from SOURCE_CONFIGS, by slug, for messages.
+CONFIG_PATHS = {}
+
+
+def load_source_configs(folder=SOURCE_CONFIGS):
+    """[(path, CONFIG)] for each folder/*.py, sorted by file name.
+
+    Files whose name starts with "_" are skipped. A file that fails to
+    import, has no CONFIG dict, or whose CONFIG has no slug stops the run,
+    naming the file and the line where the import failed. Work/ is put on
+    the import path first, so a file can import source_helpers.
+    """
+    work = os.path.dirname(os.path.abspath(__file__))
+    if work not in sys.path:
+        sys.path.insert(0, work)
+    if not os.path.isdir(folder):
+        return []
+    out = []
+    for name in sorted(os.listdir(folder)):
+        if not name.endswith(".py") or name.startswith("_"):
+            continue
+        path = os.path.join(folder, name)
+        try:
+            spec = importlib.util.spec_from_file_location("source_config_" + name[:-3], path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        except (Exception, SystemExit) as e:
+            # The line in the config file where it failed, if the error arose there.
+            here = os.path.normcase(os.path.abspath(path))
+            lines = [f.lineno for f in traceback.extract_tb(e.__traceback__)
+                     if os.path.normcase(os.path.abspath(f.filename)) == here]
+            if isinstance(e, SyntaxError) and e.lineno:
+                lines.append(e.lineno)
+            at = " (line %d)" % lines[-1] if lines else ""
+            raise SystemExit("%s: config file failed to import%s: %s: %s" % (path, at, type(e).__name__, e))
+        cfg = getattr(module, "CONFIG", None)
+        if not isinstance(cfg, dict):
+            raise SystemExit("%s: config file defines no CONFIG dict" % path)
+        if not cfg.get("slug"):
+            raise SystemExit("%s: CONFIG has no slug" % path)
+        out.append((path, cfg))
+    return out
+
+
+def all_sources(folder=SOURCE_CONFIGS):
+    """SOURCES_CONFIG (empty in the template) followed by every config file's CONFIG.
+
+    Stops the run if two sources share a slug.
+    """
+    seen = {cfg["slug"]: "SOURCES_CONFIG in Work/extract.py" for cfg in SOURCES_CONFIG if cfg.get("slug")}
+    configs = list(SOURCES_CONFIG)
+    for path, cfg in load_source_configs(folder):
+        if cfg["slug"] in seen:
+            raise SystemExit("%s: slug %r is already used by %s" % (path, cfg["slug"], seen[cfg["slug"]]))
+        seen[cfg["slug"]] = path
+        CONFIG_PATHS[cfg["slug"]] = path
+        configs.append(cfg)
+    return configs
+
+
+def select_sources(configs, slugs):
+    """The configs whose slug is in slugs (all of them when slugs is empty).
+
+    Stops the run if a slug names no source.
+    """
+    only = set(slugs)
+    if not only:
+        return list(configs)
+    known = {cfg.get("slug") for cfg in configs}
+    unknown = sorted(only - known)
+    if unknown:
+        raise SystemExit("no source has slug %s; configured: %s"
+                         % (", ".join(map(repr, unknown)), ", ".join(sorted(s for s in known if s)) or "none"))
+    return [cfg for cfg in configs if cfg.get("slug") in only]
+
+
+# Keys a config may give as a zero-argument callable (Work/SourceConfigs/README.md).
+CALLABLE_KEYS = ("line_fixes", "line_edits")
+
+
+def resolve_config(cfg):
+    """A copy of cfg with each callable line_fixes or line_edits replaced by the dict it returns.
+
+    A config file never reads the source when it is imported, so a checkout
+    without Sources/ (which git ignores) can still load every config; a key
+    built from the source file is a callable instead, called here for the
+    sources being extracted only. An error inside it stops the run, naming
+    the source, the key, and the file and line where it arose.
+    """
+    out = dict(cfg)
+    for key in CALLABLE_KEYS:
+        if not callable(out.get(key)):
+            continue
+        try:
+            out[key] = out[key]()
+        except SystemExit as e:
+            raise SystemExit("%s: %s: %s" % (cfg.get("slug"), key, e))
+        except Exception as e:
+            frame = traceback.extract_tb(e.__traceback__)[-1]
+            raise SystemExit("%s: %s failed (%s, line %d): %s: %s" % (cfg.get("slug"), key, frame.filename,
+                                                                     frame.lineno, type(e).__name__, e))
+    return out
+
+
+def extract_source(cfg, rebuild_txt=False):
+    """Extract one source into Work/Chapters/{slug}/ and Work/Raw/{slug}/; False if it has no chapters.
+
+    Callable keys are resolved first (resolve_config), then the config is
+    validated; a problem stops the run before anything is written. A source
+    whose register is unset is named in one warning line (register_warning).
+    rebuild_txt runs a paged TXT source's build_txt even when its file
+    exists (--rebuild-txt).
+    """
+    if not cfg.get("chapters"):
+        return False
+    cfg = resolve_config(cfg)
+    problems = validate_config(cfg)
+    if problems:
+        where = CONFIG_PATHS.get(cfg.get("slug"), cfg.get("slug"))
+        raise SystemExit("config errors in %s:\n  %s" % (where, "\n  ".join(problems)))
+    warning = register_warning(cfg)
+    if warning:
+        print(warning)
+    if cfg.get("md"):
+        build_md_source(cfg)
+    else:
+        build_other_source(cfg, rebuild_txt)
+    return True
+
+
+# Diff lines printed per differing chapter file by --check.
+CHECK_DIFF_LINES = 40
+
+
+def compare_chapters(new_folder, old_folder, slug):
+    """Compare re-extracted chapter files with Work/Chapters/{slug}/ byte for byte; return the differences.
+
+    Each difference is printed: a file that differs (with the start of a
+    line diff), one only the re-extraction wrote, and one only Work/Chapters
+    has. The parts/ folder is not compared (split_parts.py writes it).
+    """
+    def names(folder):
+        if not os.path.isdir(folder):
+            return set()
+        return {n for n in os.listdir(folder) if n.endswith(".md") and os.path.isfile(os.path.join(folder, n))}
+
+    new, old = names(new_folder), names(old_folder)
+    problems = 0
+    for name in sorted(new | old):
+        shown = "Work/Chapters/%s/%s" % (slug, name)
+        if name not in old:
+            print("NEW %s: written by the re-extraction, not in Work/Chapters" % shown)
+            problems += 1
+            continue
+        if name not in new:
+            print("MISSING %s: not written by the re-extraction (a chapter renamed or removed?)" % shown)
+            problems += 1
+            continue
+        with open(os.path.join(old_folder, name), "rb") as f:
+            before = f.read()
+        with open(os.path.join(new_folder, name), "rb") as f:
+            after = f.read()
+        if before == after:
+            continue
+        problems += 1
+        print("DIFFERS %s" % shown)
+        diff = list(difflib.unified_diff(before.decode("utf-8", "replace").splitlines(),
+                                         after.decode("utf-8", "replace").splitlines(),
+                                         shown, "re-extracted", n=1, lineterm=""))
+        for ln in diff[:CHECK_DIFF_LINES]:
+            print("  " + ln)
+        if len(diff) > CHECK_DIFF_LINES:
+            print("  ... %d more diff lines" % (len(diff) - CHECK_DIFF_LINES))
+        if not diff:
+            print("  (the bytes differ but no line does: line endings or a final newline)")
+    print("%s: %d chapter file(s) compared, %d difference(s)" % (slug, len(new | old), problems))
+    return problems
+
+
+def check_sources(configs, rebuild_txt=False):
+    """Re-extract sources into temporary folders and compare the chapter files with Work/Chapters.
+
+    Chapter files are never edited by hand, so each config must rebuild its
+    chapters byte for byte; a config or code change that alters a chapter
+    shows here before it reaches the parts and summaries. Work/Chapters and
+    Work/Raw are left untouched. Returns the number of differences.
+    """
+    global OUT, RAW
+    real_out, real_raw = OUT, RAW
+    problems, done = 0, []
+    with tempfile.TemporaryDirectory() as tmp:
+        OUT, RAW = os.path.join(tmp, "Chapters"), os.path.join(tmp, "Raw")
+        try:
+            done = [cfg["slug"] for cfg in configs if extract_source(cfg, rebuild_txt)]
+        finally:
+            OUT, RAW = real_out, real_raw
+        print()
+        for slug in done:
+            problems += compare_chapters(os.path.join(tmp, "Chapters", slug), os.path.join(OUT, slug), slug)
+    print("check: %d source(s) re-extracted, %d difference(s) from Work/Chapters" % (len(done), problems))
+    return problems
+
+
+USAGE = "usage: python Work/extract.py [--check] [--rebuild-txt] [slug ...]"
+OPTIONS = ("--check", "--rebuild-txt")
+
+
+def main(argv):
+    """Extract the named sources (every configured source when none is named); return the exit status.
+
+    --check re-extracts into temporary folders and compares with
+    Work/Chapters instead (exit 1 on any difference). --rebuild-txt runs
+    each paged TXT source's build_txt even when its file exists.
+    """
+    utf8_output()
+    opts = [a for a in argv if a.startswith("--")]
+    unknown = [a for a in opts if a not in OPTIONS]
+    if unknown:
+        raise SystemExit("unknown option %s\n%s" % (", ".join(unknown), USAGE))
+    configs = select_sources(all_sources(SOURCE_CONFIGS), [a for a in argv if not a.startswith("--")])
+    rebuild = "--rebuild-txt" in opts
+    if "--check" in opts:
+        return 1 if check_sources(configs, rebuild) else 0
+    ran = False
+    for cfg in configs:
+        ran = extract_source(cfg, rebuild) or ran
     if not ran:
-        print("no sources configured in SOURCES_CONFIG")
+        print("no sources with chapters configured in Work/SourceConfigs")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

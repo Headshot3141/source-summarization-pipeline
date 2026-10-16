@@ -7,7 +7,8 @@ For every chapter:
   whitespace and page markers, with frontmatter, headings, and overlap
   context left out;
 - every part boundary falls between sentences;
-- every added context block is verbatim chapter text.
+- every added context block is verbatim chapter text;
+- part budgets, and part budget bases where recorded, sum to the chapter's.
 
 Exits with status 1 if any check fails. Run from anywhere:
 
@@ -17,7 +18,16 @@ import json
 import re
 import sys
 
-from common import HARD_CAP, ROOT, chapter_body, ends_sentence, owned_text, parse_frontmatter, strip_comments
+from common import (
+    HARD_CAP,
+    ROOT,
+    chapter_body,
+    ends_sentence,
+    owned_text,
+    parse_frontmatter,
+    strip_comments,
+    utf8_output,
+)
 from count_words import words_in_text
 
 MANIFEST = ROOT / "Work" / "parts_manifest.json"
@@ -53,6 +63,11 @@ def check_chapter(entry, fail):
         fail(f"{label}: part_count does not match the number of parts ({m})")
     if sum(p["budget"] for p in parts) != entry["budget"]:
         fail(f"{label}: part budgets sum to {sum(p['budget'] for p in parts)}, chapter budget is {entry['budget']}")
+    # The budget basis (words less text left out in Work/budget_exclusions.json).
+    if "budget_words" in entry and all("budget_words" in p for p in parts):
+        if sum(p["budget_words"] for p in parts) != entry["budget_words"]:
+            fail(f"{label}: part budget bases sum to {sum(p['budget_words'] for p in parts)}, "
+                 f"chapter basis is {entry['budget_words']}")
 
     slices = []
     for p in parts:
@@ -115,6 +130,7 @@ def check_chapter(entry, fail):
 
 
 def main():
+    utf8_output()
     if not MANIFEST.exists():
         sys.exit("Work/parts_manifest.json not found; run Work/split_parts.py first")
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))

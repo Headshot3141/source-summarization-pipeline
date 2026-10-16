@@ -17,7 +17,7 @@ after checking the output and review record.
 import json
 import sys
 
-from common import ROOT
+from common import ROOT, utf8_output
 
 PARTS = ROOT / "Work" / "parts_manifest.json"
 MANIFEST = ROOT / "Work" / "manifest.json"
@@ -68,6 +68,7 @@ def list_pending(parts):
 
 
 def main():
+    utf8_output()
     args = sys.argv[1:]
     if not args:
         raise SystemExit(__doc__)
